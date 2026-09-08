@@ -23,21 +23,23 @@ func init() {
 // internal/ui/systray_darwin_nocgo.go): XTest for injection and the RECORD
 // extension for global capture.
 //
-// KNOWN RISK (flagged for tasks.md 7.6 / design.md Open Questions): the
-// RECORD extension's EnableContext request is unusual in that the X server
-// keeps streaming additional reply packets under the same original
-// sequence number for as long as the context stays enabled. xgb's cookie
-// dispatch (readResponses in xgb.go) was written for the common
-// one-reply-per-request case; whether repeated cook.Reply() calls on the
-// same EnableContext cookie keep resolving correctly for every subsequent
-// chunk — rather than only the first — has not been verified against a
-// running X server in this environment. This needs confirmation on real
-// hardware before the capture half of this backend can be trusted; if it
-// turns out only the first chunk is ever delivered, EnableContext will
-// need to move to a dedicated raw connection that bypasses xgb's cookie
-// mechanism for this one request.
+// The connection is split in two (tasks.md 7.6, verified against a running
+// X server): this xgb connection is the *control* connection, used for
+// XTest injection and for RECORD's Create/DisableContext, while the
+// streaming EnableContext request lives on a separate hand-rolled
+// connection (recordConn, record_conn_linux.go). That split is mandatory,
+// not stylistic — the X server keeps emitting further EnableContext reply
+// packets under the original request's sequence number, which xgb's
+// one-reply-per-cookie dispatch cannot represent. Measured on Xorg with
+// both halves on one xgb connection: capture stopped after the initial
+// StartOfData chunk and the very first checked FakeInput afterwards
+// blocked forever.
 type x11Backend struct {
+	// conn is the control connection: XTest injection plus RECORD's
+	// Create/DisableContext. rec is the data connection, carrying only
+	// the EnableContext stream.
 	conn *xgb.Conn
+	rec  *recordConn
 	root xproto.Window
 
 	screenW, screenH int
@@ -120,8 +122,21 @@ func (b *x11Backend) Start(ctx context.Context, cb Callbacks) error {
 		return fmt.Errorf("inputshare/x11: RECORD CreateContext failed: %w", err)
 	}
 
-	cookie := record.EnableContext(b.conn, b.ctxID)
-	go b.recordLoop(cookie)
+	rec, err := dialRecordConn()
+	if err != nil {
+		record.FreeContext(b.conn, b.ctxID)
+		close(b.stopped)
+		return fmt.Errorf("inputshare/x11: RECORD data connection failed: %w", err)
+	}
+	if err := rec.enableContext(uint32(b.ctxID)); err != nil {
+		rec.Close()
+		record.FreeContext(b.conn, b.ctxID)
+		close(b.stopped)
+		return err
+	}
+	b.rec = rec
+
+	go b.recordLoop()
 
 	go func() {
 		<-ctx.Done()
@@ -131,25 +146,22 @@ func (b *x11Backend) Start(ctx context.Context, cb Callbacks) error {
 	return nil
 }
 
-func (b *x11Backend) recordLoop(cookie record.EnableContextCookie) {
+func (b *x11Backend) recordLoop() {
 	defer close(b.stopped)
 	for {
-		reply, err := cookie.Reply()
+		chunk, err := b.rec.next()
 		if err != nil {
 			log.Printf("[inputshare/x11] RECORD stream ended: %v", err)
-			return
-		}
-		if reply == nil {
 			return
 		}
 		// Category 0 = FromServer: raw device events, which is the only
 		// category we asked for real event bytes on. Other categories
 		// (StartOfData/EndOfData/ClientStarted/ClientDied) carry no core
 		// protocol events and are safely ignored.
-		if reply.Category != 0 || len(reply.Data) == 0 {
+		if chunk.Category != 0 || len(chunk.Data) == 0 {
 			continue
 		}
-		b.parseChunk(reply.Data)
+		b.parseChunk(chunk.Data)
 	}
 }
 
@@ -253,12 +265,16 @@ func clampDelta(d int32) int16 {
 }
 
 func (b *x11Backend) Stop() {
-	// Best-effort: DisableContext lets the recordLoop's Reply() return so
-	// the goroutine can exit instead of blocking forever on a context the
-	// server will never send more data for.
+	// Tell the server to stop recording, then drop the data connection.
+	// Closing it is what actually unblocks recordLoop: its read returns an
+	// error immediately, so Stop never depends on the server choosing to
+	// send one more packet.
 	record.DisableContext(b.conn, b.ctxID)
-	_ = b.conn // conn is intentionally left open until the process exits;
-	// closing it here could race with in-flight FakeInput calls from
+	if b.rec != nil {
+		b.rec.Close()
+	}
+	// The control connection is intentionally left open until the process
+	// exits; closing it here could race with in-flight FakeInput calls from
 	// Manager.StopSession's synchronous release-all path.
 	if b.stopped != nil {
 		<-b.stopped
