@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"golang.design/x/clipboard"
 	"omnidesk/internal/config"
 	"omnidesk/internal/discovery"
-	"golang.design/x/clipboard"
 )
 
 // PeerProvider supplies active peers and configuration for broadcasting.

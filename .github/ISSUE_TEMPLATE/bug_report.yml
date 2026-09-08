@@ -1,0 +1,107 @@
+name: 🐛 Bug Report
+description: Report an issue or unexpected behavior in OmniDesk
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping us improve OmniDesk! Please ensure you have checked existing issues to see if this bug has already been reported.
+        
+        If this is a security vulnerability, please refer to our [Security Policy](https://github.com/thyagoluciano/OmniDesk/blob/main/SECURITY.md) instead of creating a public issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the problem is.
+      placeholder: Describe the problem you encountered...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions on how to reproduce the bug.
+      placeholder: |
+        1. Run `omnidesk` on Machine A (macOS)
+        2. Run `omnidesk` on Machine B (Linux)
+        3. Pair both machines using PIN
+        4. Copy text on Machine A
+        5. Observe that Machine B does not receive the clipboard update
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs Actual Behavior
+      description: What did you expect to happen, and what happened instead?
+      placeholder: Expected the clipboard to update within 100ms, but instead the daemon logged an error...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: Which operating system(s) are involved?
+      multiple: true
+      options:
+        - "Linux (Ubuntu / Debian / Mint)"
+        - "Linux (Fedora / RHEL)"
+        - "Linux (Arch Linux / Manjaro)"
+        - "macOS (Apple Silicon - M1/M2/M3/M4)"
+        - "macOS (Intel x86_64)"
+        - "Windows 11"
+        - "Windows 10"
+        - "Other (please specify in description)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: display_server
+    attributes:
+      label: Display Server (Linux only)
+      description: If you are running Linux, what display server are you using?
+      options:
+        - "N/A (macOS or Windows)"
+        - "X11"
+        - "Wayland (GNOME / Mutter)"
+        - "Wayland (KDE Plasma / KWin)"
+        - "Wayland (wlroots / Hyprland / Sway)"
+        - "Headless / CLI only"
+
+  - type: input
+    id: version
+    attributes:
+      label: OmniDesk Version
+      description: Run `omnidesk version` in your terminal.
+      placeholder: "e.g., 0.1.0 (commit f8e2805)"
+    validations:
+      required: true
+
+  - type: input
+    id: go_version
+    attributes:
+      label: Go Version (if building from source)
+      description: Run `go version` in your terminal.
+      placeholder: "e.g., go version go1.22.4 darwin/arm64"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Daemon Logs or Terminal Output
+      description: Please paste any relevant logs from `systemctl --user status omnidesk`, terminal output, or browser console.
+      render: shell
+
+  - type: checkboxes
+    id: checklists
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and verified this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (see SECURITY.md).
+          required: true

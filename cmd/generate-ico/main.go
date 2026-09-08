@@ -24,14 +24,14 @@ func main() {
 	_ = binary.Write(icoFile, binary.LittleEndian, uint16(1)) // Image Count = 1
 
 	// 2. ICONDIRENTRY (16 bytes)
-	icoFile.Write([]byte{0})                                                    // Width 256 -> 0
-	icoFile.Write([]byte{0})                                                    // Height 256 -> 0
-	icoFile.Write([]byte{0})                                                    // Color count
-	icoFile.Write([]byte{0})                                                    // Reserved
-	_ = binary.Write(icoFile, binary.LittleEndian, uint16(1))                  // Color planes
-	_ = binary.Write(icoFile, binary.LittleEndian, uint16(32))                 // Bits per pixel
-	_ = binary.Write(icoFile, binary.LittleEndian, uint32(len(pngData)))       // Data size
-	_ = binary.Write(icoFile, binary.LittleEndian, uint32(22))                 // Offset in file (6 + 16)
+	icoFile.Write([]byte{0})                                             // Width 256 -> 0
+	icoFile.Write([]byte{0})                                             // Height 256 -> 0
+	icoFile.Write([]byte{0})                                             // Color count
+	icoFile.Write([]byte{0})                                             // Reserved
+	_ = binary.Write(icoFile, binary.LittleEndian, uint16(1))            // Color planes
+	_ = binary.Write(icoFile, binary.LittleEndian, uint16(32))           // Bits per pixel
+	_ = binary.Write(icoFile, binary.LittleEndian, uint32(len(pngData))) // Data size
+	_ = binary.Write(icoFile, binary.LittleEndian, uint32(22))           // Offset in file (6 + 16)
 
 	// 3. Raw PNG Payload
 	_, err = icoFile.Write(pngData)

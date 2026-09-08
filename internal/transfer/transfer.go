@@ -112,4 +112,3 @@ func (c *Client) SendStream(ctx context.Context, body io.Reader, size int64, fil
 
 	return &res, nil
 }
-

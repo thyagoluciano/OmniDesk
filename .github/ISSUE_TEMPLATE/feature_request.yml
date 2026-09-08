@@ -1,0 +1,61 @@
+name: 💡 Feature Request
+description: Propose an idea or enhancement for OmniDesk
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an enhancement! Please review our [Product Roadmap](https://github.com/thyagoluciano/OmniDesk/blob/main/ROADMAP.md) before submitting to see if this feature is already planned.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Use Case
+      description: Is your feature request related to a specific problem or workflow friction?
+      placeholder: "e.g., I often work with large directories and compressing them manually before sending is cumbersome..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution or new capability you would like to see in OmniDesk.
+      placeholder: "e.g., Allow dragging an entire folder onto the peer card in the Web UI to stream as an on-the-fly zip archive..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative solutions or existing workarounds?
+      placeholder: "e.g., Creating a zip manually or using scp/rsync..."
+
+  - type: dropdown
+    id: target_platforms
+    attributes:
+      label: Target Platforms
+      description: Which platforms would benefit from this feature?
+      multiple: true
+      options:
+        - "All Platforms (Linux, macOS, Windows)"
+        - "Linux"
+        - "macOS"
+        - "Windows"
+        - "Web Dashboard (UI)"
+        - "CLI / Headless"
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context & Mockups
+      description: Add any screenshots, mockups, or extra details that clarify the proposal.
+
+  - type: checkboxes
+    id: checklists
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to help test or submit a Pull Request for this feature!

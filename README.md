@@ -11,9 +11,19 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/thyagoluciano/OmniDesk/actions/workflows/ci.yml"><img src="https://github.com/thyagoluciano/OmniDesk/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go" alt="Go Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/roadmap-active-success.svg" alt="Roadmap"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
+</p>
+
+<p align="center">
   <a href="#-português">🇧🇷 Português</a> &nbsp;•&nbsp;
   <a href="#-english">🇺🇸 English</a> &nbsp;•&nbsp;
-  <a href="#-español">🇪🇸 Español</a>
+  <a href="#-español">🇪🇸 Español</a> &nbsp;•&nbsp;
+  <a href="ROADMAP.md">🗺️ Roadmap</a> &nbsp;•&nbsp;
+  <a href="CONTRIBUTING.md">🤝 Contribuir</a>
 </p>
 
 ---
@@ -573,6 +583,20 @@ Los dispositivos solo necesitan emparejarse una única vez.
 
 ---
 
+## Comunidade & Contribuição / Community & Contributing
+
+Adoramos contribuições da comunidade! Para saber como participar, veja os links abaixo:
+
+- 📖 **[Guia de Contribuição / Contributing Guide](CONTRIBUTING.md)**: Como configurar o ambiente, compilar, testar e enviar Pull Requests.
+- 🗺️ **[Roadmap de Produto / Product Roadmap](ROADMAP.md)**: Visão geral de recursos concluídos, em desenvolvimento e futuros lançamentos.
+- 🤝 **[Código de Conduta / Code of Conduct](CODE_OF_CONDUCT.md)**: Nossas diretrizes de convivência e padrões da comunidade.
+- 🛡️ **[Política de Segurança / Security Policy](SECURITY.md)**: Como reportar vulnerabilidades de forma responsável.
+- 💬 **[Discussões no GitHub](https://github.com/thyagoluciano/OmniDesk/discussions)**: Fórum da comunidade para ideias e dúvidas.
+- 🐛 **[Abrir uma Issue](https://github.com/thyagoluciano/OmniDesk/issues/new/choose)**: Relatar bugs ou sugerir novas funcionalidades usando nossos formulários oficiais.
+
+---
+
 ## Licença / License / Licencia
 
-MIT License &copy; 2026 Thyago Luciano
+Este projeto é distribuído sob os termos da licença [MIT](LICENSE) &copy; 2026 Thyago Luciano.
+
