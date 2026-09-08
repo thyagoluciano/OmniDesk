@@ -38,11 +38,6 @@ type darwinBackend struct {
 
 	suppressed atomic.Bool
 
-	posMu      sync.Mutex
-	lastX      int32
-	lastY      int32
-	haveLastXY bool
-
 	// modMu/modifierHeld track modifier press/release state ourselves:
 	// macOS reports modifier keys via kCGEventFlagsChanged, which carries
 	// no pressed/released flag of its own (see dispatchFlagsChanged) — only
@@ -250,25 +245,34 @@ func (b *darwinBackend) tapCallback(proxy uintptr, eventType uint32, event uintp
 	return event
 }
 
+// dispatchMotion reports the cursor's clamped absolute position (loc, from
+// CGEventGetLocation — used for edge detection, where "at the screen edge"
+// is exactly what we want) alongside the *raw* hardware motion delta
+// (kCGMouseEventDeltaX/Y) rather than a delta computed from consecutive
+// absolute positions.
+//
+// Those two diverge exactly at a screen edge, which is exactly where this
+// backend's forwarded deltas matter most: once the OS clamps the real
+// cursor there, consecutive CGEventGetLocation reads stop changing even as
+// the user keeps physically moving the trackpad/mouse in that direction,
+// so an absolute-position-diff delta silently drops to zero right as a
+// session starts sending — the remote cursor gets stuck a few pixels past
+// the entry point and never travels the rest of the destination screen.
+// kCGMouseEventDeltaX/Y report the actual unclamped hardware motion for
+// this specific event regardless of where the OS pinned the cursor, which
+// is what a "continue pushing past the edge" gesture needs forwarded.
 func (b *darwinBackend) dispatchMotion(event uintptr) {
 	loc := b.api.CGEventGetLocation(event)
 	absX, absY := int(loc.X), int(loc.Y)
 
-	b.posMu.Lock()
-	var dx, dy int32
-	if b.haveLastXY {
-		dx = int32(absX) - b.lastX
-		dy = int32(absY) - b.lastY
-	}
-	b.lastX, b.lastY = int32(absX), int32(absY)
-	b.haveLastXY = true
-	b.posMu.Unlock()
+	dx := b.api.CGEventGetIntegerValueField(event, cgMouseEventDeltaX)
+	dy := b.api.CGEventGetIntegerValueField(event, cgMouseEventDeltaY)
 
 	b.runMu.Lock()
 	cb := b.cb
 	b.runMu.Unlock()
 	if cb.OnMotion != nil {
-		cb.OnMotion(absX, absY, clampDelta16(dx), clampDelta16(dy))
+		cb.OnMotion(absX, absY, clampDelta16(int32(dx)), clampDelta16(int32(dy)))
 	}
 }
 

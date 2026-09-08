@@ -52,6 +52,8 @@ const (
 
 // CGEventField values (CoreGraphics CGEventTypes.h) this backend reads.
 const (
+	cgMouseEventDeltaX           = 4
+	cgMouseEventDeltaY           = 5
 	cgKeyboardEventKeycode       = 9
 	cgScrollWheelEventDeltaAxis1 = 11 // vertical
 	cgScrollWheelEventDeltaAxis2 = 12 // horizontal
