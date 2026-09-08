@@ -30,6 +30,13 @@ func InstallLinux(autostart bool) error {
 		}
 	}
 
+	// Clean up legacy Crossover artifacts if present
+	_ = exec.Command("systemctl", "--user", "stop", "crossover.service").Run()
+	_ = exec.Command("systemctl", "--user", "disable", "crossover.service").Run()
+	_ = os.Remove(filepath.Join(serviceDir, "crossover.service"))
+	_ = os.Remove(filepath.Join(appDir, "crossover.desktop"))
+	_ = os.Remove(filepath.Join(binDir, "crossover"))
+
 	// 1. Install binary
 	execPath, err := os.Executable()
 	if err != nil {
