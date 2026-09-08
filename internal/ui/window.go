@@ -67,6 +67,27 @@ func OpenDashboard(port int) {
 		cmd := exec.Command("open", url)
 		_ = cmd.Start()
 
+	case "windows":
+		// On Windows, Microsoft Edge is pre-installed on Win 10/11 and supports --app=
+		edgePaths := []string{
+			`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+			`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+			"msedge.exe",
+			"msedge",
+		}
+
+		for _, p := range edgePaths {
+			cmd := exec.Command(p, fmt.Sprintf("--app=%s", url))
+			if err := cmd.Start(); err == nil {
+				log.Println("[ui] Opened dashboard in standalone window via Microsoft Edge")
+				return
+			}
+		}
+
+		// Fallback to default browser via cmd start
+		cmd := exec.Command("cmd", "/c", "start", "", url)
+		_ = cmd.Start()
+
 	default:
 		log.Printf("[ui] Dashboard URL: %s", url)
 	}

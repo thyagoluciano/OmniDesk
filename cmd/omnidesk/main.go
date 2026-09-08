@@ -101,9 +101,12 @@ func runInstall(args []string) {
 	_ = fs.Parse(args)
 
 	var err error
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		err = installer.InstallDarwin(*autostart)
-	} else {
+	case "windows":
+		err = installer.InstallWindows(*autostart)
+	default:
 		err = installer.InstallLinux(*autostart)
 	}
 
@@ -114,9 +117,12 @@ func runInstall(args []string) {
 
 func runUninstall(args []string) {
 	var err error
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		err = installer.UninstallDarwin()
-	} else {
+	case "windows":
+		err = installer.UninstallWindows()
+	default:
 		err = installer.UninstallLinux()
 	}
 
