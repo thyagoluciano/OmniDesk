@@ -13,3 +13,6 @@ var IconPNG []byte
 
 //go:embed omnidesk.svg
 var IconSVG []byte
+
+//go:embed omnidesk.ico
+var IconICO []byte

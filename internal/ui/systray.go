@@ -5,6 +5,7 @@ package ui
 import (
 	"fmt"
 	"log"
+	_ "image/png"
 	"os/exec"
 	"runtime"
 	"time"
@@ -29,9 +30,29 @@ func (t *TrayApp) Start() {
 }
 
 func (t *TrayApp) onReady() {
-	iconBytes := GenerateIconBytes()
+	iconBytes := GetTrayIcon()
 	systray.SetIcon(iconBytes)
 	systray.SetTooltip(fmt.Sprintf("OmniDesk: %s", t.node.Cfg.DeviceName))
+
+	// On Linux, fyne.io/systray starts onReady() concurrently before DBus connection
+	// and property exports are complete. Calls to SetIcon/SetTooltip during that window
+	// are silently dropped (if props == nil { return }). Re-applying with retries
+	// ensures the icon and tooltip are exported to DBus and the NewIcon signal is emitted.
+	go func() {
+		delays := []time.Duration{
+			50 * time.Millisecond,
+			150 * time.Millisecond,
+			300 * time.Millisecond,
+			600 * time.Millisecond,
+			1200 * time.Millisecond,
+			2500 * time.Millisecond,
+		}
+		for _, d := range delays {
+			time.Sleep(d)
+			systray.SetIcon(iconBytes)
+			systray.SetTooltip(fmt.Sprintf("OmniDesk: %s", t.node.Cfg.DeviceName))
+		}
+	}()
 
 	// Dashboard launcher item
 	mDashboard := systray.AddMenuItem("Abrir Painel (Dashboard)", "Abrir a interface gráfica do OmniDesk")

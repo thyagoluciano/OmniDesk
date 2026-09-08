@@ -5,7 +5,22 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"runtime"
+
+	"omnidesk/assets"
 )
+
+// GetTrayIcon returns the best icon bytes for the current operating system.
+// On Windows, it prefers the ICO format; on Linux and macOS, it prefers the official PNG asset.
+func GetTrayIcon() []byte {
+	if runtime.GOOS == "windows" && len(assets.IconICO) > 0 {
+		return assets.IconICO
+	}
+	if len(assets.IconPNG) > 0 {
+		return assets.IconPNG
+	}
+	return GenerateIconBytes()
+}
 
 // GenerateIconBytes creates a clean 64x64 PNG icon representing OmniDesk.
 func GenerateIconBytes() []byte {
