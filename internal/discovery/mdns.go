@@ -76,13 +76,25 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop unregisters mDNS server and stops browsing.
+// Stop unregisters mDNS server and stops browsing. The mDNS goodbye packet
+// send can block indefinitely at the OS level (observed when multiple
+// zeroconf servers share a process, or with certain network interfaces), so
+// it is bounded by a timeout to guarantee Stop always returns.
 func (s *Service) Stop() {
 	if s.cancelFunc != nil {
 		s.cancelFunc()
 	}
 	if s.server != nil {
-		s.server.Shutdown()
+		done := make(chan struct{})
+		go func() {
+			s.server.Shutdown()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			log.Printf("[discovery] mDNS shutdown timed out after 3s, continuing anyway")
+		}
 	}
 }
 
