@@ -1,9 +1,9 @@
 # Binaries and build artifacts
-crossover
-crossover-mac
-crossover.exe
-OmniDesk
-omnidesk
+/crossover
+/crossover-mac
+/crossover.exe
+/OmniDesk
+/omnidesk
 dist/
 bin/
 
