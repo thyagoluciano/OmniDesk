@@ -46,6 +46,18 @@ type Backend interface {
 	// ScreenRect reports this node's current logical desktop bounding box
 	// (design.md Decision 5: one rectangle per node, not per monitor).
 	ScreenRect() (ScreenRect, error)
+	// Suppress takes exclusive local ownership of the pointer and keyboard
+	// so that captured events, while this node is the sender of an active
+	// input-sharing session, are forwarded to the peer instead of ALSO
+	// being delivered to this machine's own desktop. Without it, RECORD
+	// (or the platform's equivalent capture mechanism) is a passive spy:
+	// local apps keep receiving the same input at the same time it's
+	// being forwarded. Must be released with Release when the session
+	// ends, and safe to call again after a Release.
+	Suppress() error
+	// Release undoes Suppress. Safe to call even if nothing is currently
+	// suppressed (e.g. a session that never got past DialSender).
+	Release() error
 }
 
 // ErrUnsupportedPlatform is returned by NewBackend when no capture/inject

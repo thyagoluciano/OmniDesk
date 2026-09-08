@@ -322,8 +322,8 @@ func (m *Manager) AcceptSession(w http.ResponseWriter, r *http.Request, peerID s
 }
 
 // injectAndTrack forwards a received event to the platform backend while
-// mirroring the resulting cursor position, so hot-corner detection works
-// without querying the OS on every event.
+// mirroring the resulting cursor position, so hot-corner and edge-return
+// detection work without querying the OS on every event.
 func (m *Manager) injectAndTrack(ev Event) error {
 	m.mu.Lock()
 	switch e := ev.(type) {
@@ -338,11 +338,39 @@ func (m *Manager) injectAndTrack(ev Event) error {
 	active := m.active
 	m.mu.Unlock()
 
-	if corner != CornerNone && active != nil && hitsCorner(x, y, m.localRect, corner) {
+	if active != nil && m.shouldRequestReturn(x, y, corner) {
 		active.conn.SendRequestReturn()
 	}
 
 	return m.backend.Inject(ev)
+}
+
+// shouldRequestReturn reports whether the tracked cursor of a node
+// currently *receiving* control has reached a point that should hand
+// ownership back to whoever is sending: either the configured hot corner,
+// or — per specs/screen-layout's "Transição de borda dispara mudança de
+// posse de input", which is written generally, not scoped to "only when
+// idle" — any other screen edge that has a configured neighbor. Without
+// this, a node being controlled has no way to hand input back by crossing
+// out the way it came in; the only escapes left are the hotkey and a
+// manual dashboard/tray pause, which is only reachable if a local browser
+// isn't ALSO grabbed away by Suppress on the sender (see tasks.md 7.7/7.8).
+//
+// This always routes back to the current sender rather than relaying to a
+// third node even when the crossed edge's configured neighbor is someone
+// else — genuine multi-hop handoff is future work (tasks.md 7.8); "give
+// control back to whoever has it" is the safe behavior for every edge in
+// the meantime.
+func (m *Manager) shouldRequestReturn(x, y int, corner Corner) bool {
+	if corner != CornerNone && hitsCorner(x, y, m.localRect, corner) {
+		return true
+	}
+	edge, along, atEdge := m.edgeAt(x, y)
+	if !atEdge {
+		return false
+	}
+	_, ok := m.layout.Cross(m.localNodeID, edge, along)
+	return ok
 }
 
 func hitsCorner(x, y int, rect ScreenRect, c Corner) bool {
@@ -402,18 +430,42 @@ func (m *Manager) StopSession() {
 	}
 	if active.r == roleSender {
 		active.conn.SendReleaseAll()
+		m.backend.Release()
 	}
 	active.conn.Close()
 	log.Printf("[inputshare] sessão com %s encerrada", active.peerID)
 }
 
+// clearSession ends a receive session from the receiving side's own
+// bookkeeping (called when the sender closes the connection — including
+// right after this same node asked for control back, see
+// shouldRequestReturn). It only ever runs for role receiver: the sender
+// side tears down through StopSession instead.
+//
+// Ending a receive session always leaves the OS-level cursor sitting
+// exactly at whatever edge triggered the handoff — that's the position
+// that made shouldRequestReturn fire in the first place. The moment
+// m.active goes nil, this node's own capture re-arms edge detection
+// (handleLocalMotion), and it's now watching a cursor parked right on the
+// trigger line: the next motion sample from *anything* — a fraction of a
+// pixel of jitter, unrelated local X activity, even a stray leftover
+// event from the session that just ended — reads as "still at the edge,
+// still trying to leave" and starts a brand new session straight back
+// out, with roles swapped from what either side expects. Warping to the
+// screen's center gives a real margin against that before re-arming.
 func (m *Manager) clearSession(peerID string) {
 	m.mu.Lock()
-	if m.active != nil && m.active.peerID == peerID {
+	cleared := m.active != nil && m.active.peerID == peerID
+	if cleared {
 		m.active = nil
 		m.heldSet = make(map[HIDUsage]bool)
 	}
+	rect := m.localRect
 	m.mu.Unlock()
+
+	if cleared && m.backend != nil {
+		m.backend.Inject(MouseWarpEvent{X: uint16(rect.WidthPx / 2), Y: uint16(rect.HeightPx / 2)})
+	}
 }
 
 // handleLocalMotion is the capture backend's pointer-motion callback. While
@@ -488,11 +540,23 @@ func (m *Manager) tryBeginSending(edge Edge, along int) {
 		return
 	}
 
+	// Suppress before publishing m.active: once handleLocalMotion sees an
+	// active sender session it starts forwarding instead of watching for
+	// edges, so the grab must already be in place by then — otherwise a
+	// window between "active" and "grabbed" would leak local delivery of
+	// whatever the user does in that gap.
+	if err := m.backend.Suppress(); err != nil {
+		log.Printf("[inputshare] não foi possível suprimir input local, abortando controle de %s: %v", peerID, err)
+		conn.Close()
+		return
+	}
+
 	m.mu.Lock()
 	if m.active != nil {
 		// Lost a race with an incoming session; abandon this attempt.
 		m.mu.Unlock()
 		conn.Close()
+		m.backend.Release()
 		return
 	}
 	m.active = &activeSession{peerID: peerID, r: roleSender, conn: conn}
@@ -509,7 +573,12 @@ func (m *Manager) tryBeginSending(edge Edge, along int) {
 // along-edge coordinate) into a full (X, Y) pair in the destination's pixel
 // space, placing the fixed coordinate just inside the entry edge.
 func warpEntryPoint(c Crossing, dst ScreenRect) (x, y uint16) {
-	const inset = 1
+	// 1px put the entry point right next to the edge-return threshold
+	// shouldRequestReturn checks (tasks.md 7.8/7.9): any 1px of jitter
+	// right after crossing in immediately bounced control back out. A
+	// real margin means an accidental wobble doesn't read as "didn't
+	// migrate" — bouncing back out now takes a deliberate move.
+	const inset = 20
 	switch c.ToEdge {
 	case EdgeLeft:
 		return inset, uint16(clampInt(c.AlongPx, 0, dst.HeightPx-1))
@@ -552,10 +621,24 @@ func (m *Manager) handleLocalScroll(dx, dy int16) {
 	}
 }
 
+// panicHotkeyCombo is a fixed, non-configurable "give me my computer back"
+// chord, checked in addition to whatever the user configured as their own
+// return hotkey (which may be unset). Suppress() grabs the pointer and
+// keyboard on the sender for the duration of a session (tasks.md 7.7),
+// which also blocks local interaction with this same machine's own
+// dashboard/tray pause button — so unlike the other two escapes, this one
+// cannot depend on any prior setup existing. Four modifiers held together
+// is deliberately unlikely to be pressed by accident or bound by a window
+// manager.
+var panicHotkeyCombo = []HIDUsage{
+	HIDKeyLeftControl, HIDKeyLeftAlt, HIDKeyLeftShift, HIDKeyEscape,
+}
+
 // handleLocalKey forwards key events while sending, and — before
-// forwarding — checks whether the physical origin's hotkey chord is now
-// fully held, in which case it swallows the combo and reclaims local
-// control instead of forwarding it (design.md: "hotkey global de retorno").
+// forwarding — checks whether the physical origin's hotkey chord (the
+// user-configured one, or the always-on panicHotkeyCombo) is now fully
+// held, in which case it swallows the combo and reclaims local control
+// instead of forwarding it (design.md: "hotkey global de retorno").
 func (m *Manager) handleLocalKey(hid HIDUsage, pressed bool) {
 	m.mu.Lock()
 	active := m.active
@@ -569,7 +652,8 @@ func (m *Manager) handleLocalKey(hid HIDUsage, pressed bool) {
 	} else {
 		delete(m.heldSet, hid)
 	}
-	hotkeyMatched := len(m.hotkeyCombo) > 0 && allHeld(m.heldSet, m.hotkeyCombo)
+	hotkeyMatched := (len(m.hotkeyCombo) > 0 && allHeld(m.heldSet, m.hotkeyCombo)) ||
+		allHeld(m.heldSet, panicHotkeyCombo)
 	m.mu.Unlock()
 
 	if hotkeyMatched {

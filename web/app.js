@@ -615,19 +615,82 @@ function renderKvmPermissionList() {
   });
 }
 
+// KVM_BOX_W/H match the fixed on-screen footprint of .kvm-node in
+// style.css — the same numbers detectKvmEdge already assumes when reading
+// positions back. computePositionsFromLinks uses them to lay boxes out
+// actually touching along whatever server-configured links exist.
+const KVM_BOX_W = 120;
+const KVM_BOX_H = 80;
+const KVM_BOX_GAP = 2;
+
+// computePositionsFromLinks derives canvas pixel positions from the
+// server's real adjacency graph (BFS from a seed node, placing each
+// linked neighbor touching the edge its link names), instead of trusting
+// whatever this browser happens to have cached. Without this, a browser
+// that never dragged a box (a fresh profile, or a layout configured via
+// the API/CLI instead of this dashboard — see tasks.md 9.1) renders boxes
+// at their untouched default grid spot, and clicking "Salvar" there
+// recomputes links from THOSE positions — silently wiping the real
+// configuration with an empty one (tasks.md 7.10).
+function computePositionsFromLinks(nodeIDs, links, seedPos) {
+  const adjacency = {};
+  nodeIDs.forEach(id => { adjacency[id] = []; });
+  links.forEach(l => {
+    if (adjacency[l.from_node]) {
+      adjacency[l.from_node].push({ edge: l.from_edge, to: l.to_node });
+    }
+  });
+
+  const seed = kvmLocalNodeID && nodeIDs.includes(kvmLocalNodeID) ? kvmLocalNodeID : nodeIDs[0];
+  const positions = { [seed]: { left: seedPos.left, top: seedPos.top } };
+  const queue = [seed];
+
+  while (queue.length) {
+    const id = queue.shift();
+    const pos = positions[id];
+    adjacency[id].forEach(({ edge, to }) => {
+      if (positions[to]) return; // already placed via some other path
+      let left = pos.left, top = pos.top;
+      switch (edge) {
+        case "right": left = pos.left + KVM_BOX_W + KVM_BOX_GAP; break;
+        case "left": left = pos.left - KVM_BOX_W - KVM_BOX_GAP; break;
+        case "bottom": top = pos.top + KVM_BOX_H + KVM_BOX_GAP; break;
+        case "top": top = pos.top - KVM_BOX_H - KVM_BOX_GAP; break;
+      }
+      positions[to] = { left, top };
+      queue.push(to);
+    });
+  }
+
+  return positions;
+}
+
 function mergeKvmLayoutFromServer(layout) {
   const stored = loadStoredCanvasPositions();
   const serverNodes = layout.nodes || {};
+  const serverLinks = layout.links || [];
   const knownIDs = new Set(Object.keys(kvmLayoutNodes));
 
   // Ensure the local node and every trusted device has a canvas entry.
   const allIDs = new Set([kvmLocalNodeID, ...trustedDevicesCache.map(d => d.id)].filter(Boolean));
   allIDs.forEach(id => knownIDs.add(id));
 
+  const idsWithLinks = new Set();
+  serverLinks.forEach(l => { idsWithLinks.add(l.from_node); idsWithLinks.add(l.to_node); });
+  const linkedPositions = idsWithLinks.size > 0
+    ? computePositionsFromLinks(
+        Array.from(idsWithLinks), serverLinks,
+        stored[kvmLocalNodeID] || defaultKvmGridPosition(0)
+      )
+    : {};
+
   let i = 0;
   knownIDs.forEach(id => {
     const res = serverNodes[id] || KVM_DEFAULT_NODE_SIZE_FOR(id, layout);
-    const pos = stored[id] || defaultKvmGridPosition(i);
+    // A node the server's links actually place always wins over a stale
+    // (or absent) localStorage snapshot — see comment on
+    // computePositionsFromLinks above.
+    const pos = linkedPositions[id] || stored[id] || defaultKvmGridPosition(i);
     kvmLayoutNodes[id] = {
       leftPx: pos.left,
       topPx: pos.top,
@@ -636,6 +699,10 @@ function mergeKvmLayoutFromServer(layout) {
     };
     i++;
   });
+
+  // Persist the derived positions: reloading stays stable, and a save
+  // from right here recomputes the SAME links instead of different ones.
+  storeCanvasPositions();
 }
 
 function KVM_DEFAULT_NODE_SIZE_FOR(id, layout) {

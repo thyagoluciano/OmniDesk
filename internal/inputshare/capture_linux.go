@@ -380,3 +380,51 @@ func (b *x11Backend) injectScroll(e MouseScrollEvent) error {
 	}
 	return nil
 }
+
+// Suppress grabs the pointer and keyboard on the root window with
+// owner-events disabled and an empty event mask: the X server stops
+// delivering button, motion and key events to every other client (this
+// machine's own desktop included) for as long as the grab holds, while our
+// RECORD stream — a passive spy, unaffected by grabs — keeps seeing
+// everything to forward on. GrabModeAsync for both devices keeps normal
+// event processing/timing intact; only delivery is redirected away from
+// local apps.
+func (b *x11Backend) Suppress() error {
+	ptr, err := xproto.GrabPointer(
+		b.conn, false, b.root, 0,
+		xproto.GrabModeAsync, xproto.GrabModeAsync,
+		0, 0, xproto.TimeCurrentTime,
+	).Reply()
+	if err != nil {
+		return fmt.Errorf("inputshare/x11: GrabPointer failed: %w", err)
+	}
+	if ptr.Status != xproto.GrabStatusSuccess {
+		return fmt.Errorf("inputshare/x11: GrabPointer refused (status %d)", ptr.Status)
+	}
+
+	kbd, err := xproto.GrabKeyboard(
+		b.conn, false, b.root, xproto.TimeCurrentTime,
+		xproto.GrabModeAsync, xproto.GrabModeAsync,
+	).Reply()
+	if err != nil {
+		xproto.UngrabPointer(b.conn, xproto.TimeCurrentTime)
+		return fmt.Errorf("inputshare/x11: GrabKeyboard failed: %w", err)
+	}
+	if kbd.Status != xproto.GrabStatusSuccess {
+		xproto.UngrabPointer(b.conn, xproto.TimeCurrentTime)
+		return fmt.Errorf("inputshare/x11: GrabKeyboard refused (status %d)", kbd.Status)
+	}
+
+	return nil
+}
+
+// Release undoes Suppress. Both requests are unchecked and best-effort: by
+// the time a session is ending (peer gone, network dropped) the connection
+// itself may already be in a bad state, and there is nothing more useful to
+// do with an ungrab error than log noise — the grab is also implicitly
+// dropped if this process's X connection ever closes.
+func (b *x11Backend) Release() error {
+	xproto.UngrabPointer(b.conn, xproto.TimeCurrentTime)
+	xproto.UngrabKeyboard(b.conn, xproto.TimeCurrentTime)
+	return nil
+}
