@@ -128,6 +128,53 @@
           <!-- Discovered cards populated via app.js -->
         </div>
       </section>
+
+      <!-- Input Sharing (KVM) Section -->
+      <section class="section">
+        <div class="section-header">
+          <h2>Controle de Mouse e Teclado (KVM)</h2>
+          <span class="badge badge-secondary" id="kvm-status-badge">Inativo</span>
+        </div>
+
+        <div id="kvm-pending-requests"></div>
+
+        <div class="toolbar-card" style="margin-bottom:16px;">
+          <div class="toolbar-info">
+            <div>
+              <h3>Permissões de controle por dispositivo</h3>
+              <p>Controlar o mouse/teclado de um dispositivo é uma permissão separada do pareamento — peça e aprove por dispositivo.</p>
+            </div>
+          </div>
+        </div>
+        <div id="kvm-permission-list" class="grid-devices"></div>
+
+        <div class="toolbar-card" style="margin: 20px 0 12px;">
+          <div class="toolbar-info">
+            <div>
+              <h3>Arranjo das telas</h3>
+              <p>Arraste os retângulos para posicionar cada computador. Telas encostadas viram bordas de transição do cursor.</p>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btn-save-layout">Salvar arranjo</button>
+        </div>
+        <div id="kvm-layout-canvas" class="kvm-canvas"></div>
+
+        <div class="toolbar-card" style="margin-top:16px;">
+          <div class="toolbar-info">
+            <div>
+              <h3>Escape: retorno rápido de controle</h3>
+              <p>Canto da tela que sempre devolve o controle para este computador, independente do arranjo.</p>
+            </div>
+          </div>
+          <select id="kvm-hotcorner-select">
+            <option value="">Desativado</option>
+            <option value="top-left">Superior esquerdo</option>
+            <option value="top-right">Superior direito</option>
+            <option value="bottom-left">Inferior esquerdo</option>
+            <option value="bottom-right">Inferior direito</option>
+          </select>
+        </div>
+      </section>
     </main>
 
     <!-- Footer -->

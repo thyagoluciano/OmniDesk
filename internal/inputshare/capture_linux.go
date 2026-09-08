@@ -1,0 +1,366 @@
+//go:build linux
+
+package inputshare
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"sync"
+
+	"github.com/BurntSushi/xgb"
+	"github.com/BurntSushi/xgb/record"
+	"github.com/BurntSushi/xgb/xproto"
+	"github.com/BurntSushi/xgb/xtest"
+)
+
+func init() {
+	newPlatformBackend = newX11Backend
+}
+
+// x11Backend implements Backend for Linux/X11 using the pure-Go xgb
+// bindings (no cgo, keeping the project's existing convention — see
+// internal/ui/systray_darwin_nocgo.go): XTest for injection and the RECORD
+// extension for global capture.
+//
+// KNOWN RISK (flagged for tasks.md 7.6 / design.md Open Questions): the
+// RECORD extension's EnableContext request is unusual in that the X server
+// keeps streaming additional reply packets under the same original
+// sequence number for as long as the context stays enabled. xgb's cookie
+// dispatch (readResponses in xgb.go) was written for the common
+// one-reply-per-request case; whether repeated cook.Reply() calls on the
+// same EnableContext cookie keep resolving correctly for every subsequent
+// chunk — rather than only the first — has not been verified against a
+// running X server in this environment. This needs confirmation on real
+// hardware before the capture half of this backend can be trusted; if it
+// turns out only the first chunk is ever delivered, EnableContext will
+// need to move to a dedicated raw connection that bypasses xgb's cookie
+// mechanism for this one request.
+type x11Backend struct {
+	conn *xgb.Conn
+	root xproto.Window
+
+	screenW, screenH int
+	ctxID            record.Context
+
+	keyToHID map[byte]HIDUsage
+	hidToKey map[HIDUsage]byte
+
+	mu         sync.Mutex
+	lastX      int32
+	lastY      int32
+	haveLastXY bool
+
+	cb      Callbacks
+	stopped chan struct{}
+}
+
+func newX11Backend() (Backend, error) {
+	conn, err := xgb.NewConn()
+	if err != nil {
+		// No X server reachable — most commonly a Wayland-only session
+		// (no XWayland) or a headless machine. Treat exactly like any
+		// other unsupported platform (task 7.5).
+		return nil, fmt.Errorf("%w: %v", ErrUnsupportedPlatform, err)
+	}
+
+	if err := xtest.Init(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("inputshare/x11: XTest extension unavailable: %w", err)
+	}
+	if err := record.Init(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("inputshare/x11: RECORD extension unavailable: %w", err)
+	}
+
+	setup := xproto.Setup(conn)
+	screen := setup.DefaultScreen(conn)
+
+	ctxID, err := record.NewContextId(conn)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("inputshare/x11: failed to allocate RECORD context id: %w", err)
+	}
+
+	return &x11Backend{
+		conn:     conn,
+		root:     screen.Root,
+		screenW:  int(screen.WidthInPixels),
+		screenH:  int(screen.HeightInPixels),
+		ctxID:    ctxID,
+		keyToHID: buildKeycodeToHIDMap(),
+		hidToKey: buildHIDToKeycodeMap(),
+	}, nil
+}
+
+func (b *x11Backend) Name() string { return "x11" }
+
+func (b *x11Backend) ScreenRect() (ScreenRect, error) {
+	return ScreenRect{WidthPx: b.screenW, HeightPx: b.screenH}, nil
+}
+
+// recordDeviceEvents covers the core protocol event codes we care about:
+// KeyPress(2), KeyRelease(3), ButtonPress(4), ButtonRelease(5),
+// MotionNotify(6).
+var recordDeviceEvents = record.Range8{First: xproto.KeyPress, Last: xproto.MotionNotify}
+
+func (b *x11Backend) Start(ctx context.Context, cb Callbacks) error {
+	b.cb = cb
+	b.stopped = make(chan struct{})
+
+	ranges := []record.Range{{DeviceEvents: recordDeviceEvents}}
+	clientSpecs := []record.ClientSpec{record.CsAllClients}
+
+	if err := record.CreateContextChecked(
+		b.conn, b.ctxID, record.ElementHeader(0),
+		uint32(len(clientSpecs)), uint32(len(ranges)),
+		clientSpecs, ranges,
+	).Check(); err != nil {
+		close(b.stopped)
+		return fmt.Errorf("inputshare/x11: RECORD CreateContext failed: %w", err)
+	}
+
+	cookie := record.EnableContext(b.conn, b.ctxID)
+	go b.recordLoop(cookie)
+
+	go func() {
+		<-ctx.Done()
+		b.Stop()
+	}()
+
+	return nil
+}
+
+func (b *x11Backend) recordLoop(cookie record.EnableContextCookie) {
+	defer close(b.stopped)
+	for {
+		reply, err := cookie.Reply()
+		if err != nil {
+			log.Printf("[inputshare/x11] RECORD stream ended: %v", err)
+			return
+		}
+		if reply == nil {
+			return
+		}
+		// Category 0 = FromServer: raw device events, which is the only
+		// category we asked for real event bytes on. Other categories
+		// (StartOfData/EndOfData/ClientStarted/ClientDied) carry no core
+		// protocol events and are safely ignored.
+		if reply.Category != 0 || len(reply.Data) == 0 {
+			continue
+		}
+		b.parseChunk(reply.Data)
+	}
+}
+
+// parseChunk splits a RECORD data chunk into the standard, fixed 32-byte
+// core X protocol events it is defined to contain and dispatches each one.
+func (b *x11Backend) parseChunk(data []byte) {
+	const eventSize = 32
+	for len(data) >= eventSize {
+		raw := data[:eventSize]
+		data = data[eventSize:]
+
+		// High bit marks "sent via SendEvent"; irrelevant for real device
+		// input, and RECORD-delivered core events don't set it, but strip
+		// it defensively before dispatch.
+		code := raw[0] & 0x7f
+
+		switch code {
+		case xproto.KeyPress, xproto.KeyRelease:
+			b.dispatchKey(raw, code == xproto.KeyPress)
+		case xproto.ButtonPress, xproto.ButtonRelease:
+			b.dispatchButton(raw, code == xproto.ButtonPress)
+		case xproto.MotionNotify:
+			b.dispatchMotion(raw)
+		}
+	}
+}
+
+func (b *x11Backend) dispatchKey(raw []byte, pressed bool) {
+	ev := xproto.KeyPressEventNew(raw).(xproto.KeyPressEvent)
+	hid, ok := b.keyToHID[byte(ev.Detail)]
+	if !ok {
+		log.Printf("[inputshare/x11] keycode %d sem mapeamento HID conhecido, ignorado", ev.Detail)
+		return
+	}
+	if b.cb.OnKey != nil {
+		b.cb.OnKey(hid, pressed)
+	}
+}
+
+func (b *x11Backend) dispatchButton(raw []byte, pressed bool) {
+	ev := xproto.ButtonPressEventNew(raw).(xproto.ButtonPressEvent)
+	switch ev.Detail {
+	case 1:
+		if b.cb.OnButton != nil {
+			b.cb.OnButton(MouseButtonLeft, pressed)
+		}
+	case 2:
+		if b.cb.OnButton != nil {
+			b.cb.OnButton(MouseButtonMiddle, pressed)
+		}
+	case 3:
+		if b.cb.OnButton != nil {
+			b.cb.OnButton(MouseButtonRight, pressed)
+		}
+	case 4: // scroll up
+		if pressed && b.cb.OnScroll != nil {
+			b.cb.OnScroll(0, -1)
+		}
+	case 5: // scroll down
+		if pressed && b.cb.OnScroll != nil {
+			b.cb.OnScroll(0, 1)
+		}
+	case 6: // scroll left
+		if pressed && b.cb.OnScroll != nil {
+			b.cb.OnScroll(-1, 0)
+		}
+	case 7: // scroll right
+		if pressed && b.cb.OnScroll != nil {
+			b.cb.OnScroll(1, 0)
+		}
+	}
+}
+
+func (b *x11Backend) dispatchMotion(raw []byte) {
+	ev := xproto.MotionNotifyEventNew(raw).(xproto.MotionNotifyEvent)
+
+	b.mu.Lock()
+	var dx, dy int32
+	if b.haveLastXY {
+		dx = int32(ev.RootX) - b.lastX
+		dy = int32(ev.RootY) - b.lastY
+	}
+	b.lastX, b.lastY = int32(ev.RootX), int32(ev.RootY)
+	b.haveLastXY = true
+	b.mu.Unlock()
+
+	if b.cb.OnMotion != nil {
+		b.cb.OnMotion(int(ev.RootX), int(ev.RootY), clampDelta(dx), clampDelta(dy))
+	}
+}
+
+func clampDelta(d int32) int16 {
+	const max = 32767
+	if d > max {
+		return max
+	}
+	if d < -max {
+		return -max
+	}
+	return int16(d)
+}
+
+func (b *x11Backend) Stop() {
+	// Best-effort: DisableContext lets the recordLoop's Reply() return so
+	// the goroutine can exit instead of blocking forever on a context the
+	// server will never send more data for.
+	record.DisableContext(b.conn, b.ctxID)
+	_ = b.conn // conn is intentionally left open until the process exits;
+	// closing it here could race with in-flight FakeInput calls from
+	// Manager.StopSession's synchronous release-all path.
+	if b.stopped != nil {
+		<-b.stopped
+	}
+}
+
+// x11ButtonDetail maps our platform-independent MouseButton to the X11
+// button number convention (2 = middle, 3 = right — swapped relative to
+// our own Right=2/Middle=3 ordering).
+func x11ButtonDetail(btn MouseButton) byte {
+	switch btn {
+	case MouseButtonLeft:
+		return 1
+	case MouseButtonMiddle:
+		return 2
+	case MouseButtonRight:
+		return 3
+	default:
+		return 1
+	}
+}
+
+func (b *x11Backend) Inject(ev Event) error {
+	switch e := ev.(type) {
+	case MouseMoveEvent:
+		return xtest.FakeInputChecked(b.conn, xproto.MotionNotify, 1, xproto.TimeCurrentTime, b.root, e.DX, e.DY, 0).Check()
+
+	case MouseWarpEvent:
+		return xtest.FakeInputChecked(b.conn, xproto.MotionNotify, 0, xproto.TimeCurrentTime, b.root, int16(e.X), int16(e.Y), 0).Check()
+
+	case MouseButtonEvent:
+		t := byte(xproto.ButtonRelease)
+		if e.Pressed {
+			t = xproto.ButtonPress
+		}
+		return xtest.FakeInputChecked(b.conn, t, x11ButtonDetail(e.Button), xproto.TimeCurrentTime, b.root, 0, 0, 0).Check()
+
+	case MouseScrollEvent:
+		return b.injectScroll(e)
+
+	case KeyEvent:
+		keycode, ok := b.hidToKey[e.HID]
+		if !ok {
+			return fmt.Errorf("inputshare/x11: no native keycode mapped for HID 0x%02X", e.HID)
+		}
+		t := byte(xproto.KeyRelease)
+		if e.Pressed {
+			t = xproto.KeyPress
+		}
+		return xtest.FakeInputChecked(b.conn, t, keycode, xproto.TimeCurrentTime, b.root, 0, 0, 0).Check()
+
+	default:
+		return nil
+	}
+}
+
+// injectScroll synthesizes wheel button click pairs, one per unit of
+// scroll delta (X11 has no continuous wheel event — see design.md's
+// discussion of scroll handling).
+func (b *x11Backend) injectScroll(e MouseScrollEvent) error {
+	const maxTicks = 20 // guard against a pathological delta flooding the connection
+
+	click := func(detail byte) error {
+		if err := xtest.FakeInputChecked(b.conn, xproto.ButtonPress, detail, xproto.TimeCurrentTime, b.root, 0, 0, 0).Check(); err != nil {
+			return err
+		}
+		return xtest.FakeInputChecked(b.conn, xproto.ButtonRelease, detail, xproto.TimeCurrentTime, b.root, 0, 0, 0).Check()
+	}
+
+	if e.DY != 0 {
+		detail := byte(4)
+		n := int(e.DY)
+		if n < 0 {
+			n = -n
+		} else {
+			detail = 5
+		}
+		if n > maxTicks {
+			n = maxTicks
+		}
+		for i := 0; i < n; i++ {
+			if err := click(detail); err != nil {
+				return err
+			}
+		}
+	}
+	if e.DX != 0 {
+		detail := byte(6)
+		n := int(e.DX)
+		if n < 0 {
+			n = -n
+		} else {
+			detail = 7
+		}
+		if n > maxTicks {
+			n = maxTicks
+		}
+		for i := 0; i < n; i++ {
+			if err := click(detail); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

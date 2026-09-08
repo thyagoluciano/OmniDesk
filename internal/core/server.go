@@ -15,6 +15,7 @@ import (
 
 	"omnidesk/internal/config"
 	"omnidesk/internal/discovery"
+	"omnidesk/internal/inputshare"
 	"omnidesk/internal/pairing"
 	"omnidesk/web"
 )
@@ -86,6 +87,21 @@ func (s *Server) Start(port int) error {
 	// Protected endpoints (require trusted device token)
 	mux.HandleFunc("/api/v1/clipboard", s.authMiddleware(s.handleClipboard))
 	mux.HandleFunc("/api/v1/files/upload", s.authMiddleware(s.handleFileUpload))
+	mux.HandleFunc("/api/v1/input/ws", s.authMiddleware(s.handleInputWS))
+	mux.HandleFunc("/api/v1/input/permission/request", s.authMiddleware(s.handleInputPermissionRequest))
+	mux.HandleFunc("/api/v1/input/permission/status", s.authMiddleware(s.handleInputPermissionStatus))
+
+	// Web UI management endpoints for input sharing — loopback-only, same
+	// reasoning as the device management endpoints above.
+	mux.HandleFunc("/api/v1/input/permission/pending", s.loopbackOnly(s.handleInputPermissionPending))
+	mux.HandleFunc("/api/v1/input/permission/approve", s.loopbackOnly(s.handleInputPermissionApprove))
+	mux.HandleFunc("/api/v1/input/permission/deny", s.loopbackOnly(s.handleInputPermissionDeny))
+	mux.HandleFunc("/api/v1/input/permission/revoke", s.loopbackOnly(s.handleInputPermissionRevoke))
+	mux.HandleFunc("/api/v1/input/permission/ask", s.loopbackOnly(s.handleInputPermissionAsk))
+	mux.HandleFunc("/api/v1/input/layout", s.loopbackOnly(s.handleInputLayout))
+	mux.HandleFunc("/api/v1/input/status", s.loopbackOnly(s.handleInputStatus))
+	mux.HandleFunc("/api/v1/input/pause", s.loopbackOnly(s.handleInputPause))
+	mux.HandleFunc("/api/v1/input/resume", s.loopbackOnly(s.handleInputResume))
 
 	s.listenAddr = fmt.Sprintf("0.0.0.0:%d", port)
 	s.httpServer = &http.Server{
@@ -340,6 +356,241 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleInputWS upgrades an authenticated peer-to-peer request into the
+// receiving side of an input-sharing session (specs/input-sharing-transport
+// "Canal WebSocket autenticado por par de dispositivos"). Authentication
+// already happened in authMiddleware; here we only enforce the separate,
+// opt-in input-control permission and the one-session-at-a-time invariant
+// before ever upgrading the connection.
+func (s *Server) handleInputWS(w http.ResponseWriter, r *http.Request) {
+	if s.node == nil || s.node.InputMgr == nil {
+		http.Error(w, "input sharing not available", http.StatusServiceUnavailable)
+		return
+	}
+	peerID := r.Header.Get("X-OmniDesk-Device-ID")
+	if err := s.node.InputMgr.AcceptSession(w, r, peerID); err != nil {
+		// AcceptSession only writes to w itself once it has successfully
+		// upgraded (at which point the HTTP response is already spent), so
+		// an error here always means the upgrade never happened.
+		http.Error(w, err.Error(), http.StatusForbidden)
+	}
+}
+
+// handleInputPermissionRequest lets a paired peer ask this node to grant it
+// permission to control the mouse/keyboard (specs/input-control-permission:
+// "Concessão de permissão exige confirmação explícita"). It only records
+// the request — a human still has to approve it via the dashboard.
+func (s *Server) handleInputPermissionRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.node == nil || s.node.InputMgr == nil {
+		http.Error(w, "input sharing not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var payload inputshare.PermissionRequestPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	peerID := r.Header.Get("X-OmniDesk-Device-ID")
+	s.node.InputMgr.Permissions().RegisterRequest(peerID, payload.RequesterName)
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"pending"}`))
+}
+
+// handleInputPermissionStatus lets the requester poll whether its request
+// has been approved yet.
+func (s *Server) handleInputPermissionStatus(w http.ResponseWriter, r *http.Request) {
+	if s.node == nil || s.node.InputMgr == nil {
+		http.Error(w, "input sharing not available", http.StatusServiceUnavailable)
+		return
+	}
+	peerID := r.Header.Get("X-OmniDesk-Device-ID")
+	granted := s.node.InputMgr.Permissions().IsGrantedTo(peerID)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"granted": granted})
+}
+
+func (s *Server) handleInputPermissionPending(w http.ResponseWriter, r *http.Request) {
+	if s.node == nil || s.node.InputMgr == nil {
+		http.Error(w, "input sharing not available", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.node.InputMgr.Permissions().Pending())
+}
+
+type inputPermissionDeviceRequest struct {
+	DeviceID string `json:"device_id"`
+}
+
+func (s *Server) decodeDeviceIDBody(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return "", false
+	}
+	var body inputPermissionDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DeviceID == "" {
+		http.Error(w, "device_id is required", http.StatusBadRequest)
+		return "", false
+	}
+	return body.DeviceID, true
+}
+
+func (s *Server) handleInputPermissionApprove(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := s.decodeDeviceIDBody(w, r)
+	if !ok {
+		return
+	}
+	if err := s.node.InputMgr.Permissions().Approve(deviceID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"success":true}`))
+}
+
+func (s *Server) handleInputPermissionDeny(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := s.decodeDeviceIDBody(w, r)
+	if !ok {
+		return
+	}
+	s.node.InputMgr.Permissions().Deny(deviceID)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"success":true}`))
+}
+
+func (s *Server) handleInputPermissionRevoke(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := s.decodeDeviceIDBody(w, r)
+	if !ok {
+		return
+	}
+	if err := s.node.InputMgr.Permissions().Revoke(deviceID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"success":true}`))
+}
+
+// handleInputPermissionAsk triggers the dashboard-initiated outbound half
+// of the permission handshake: asking a peer to grant this node control.
+func (s *Server) handleInputPermissionAsk(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := s.decodeDeviceIDBody(w, r)
+	if !ok {
+		return
+	}
+	if err := s.node.InputMgr.RequestControlOf(r.Context(), deviceID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"requested"}`))
+}
+
+// inputLayoutPayload is the dashboard-facing JSON shape for the screen
+// arrangement and escape-mechanism settings (task 4.4 / 8.1 / 8.4).
+type inputLayoutPayload struct {
+	Nodes     map[string]inputshare.ScreenRect `json:"nodes"`
+	Links     []inputshare.Link                `json:"links"`
+	HotkeyHID []int                            `json:"hotkey_hid"`
+	HotCorner string                           `json:"hot_corner"`
+	LocalNode string                           `json:"local_node,omitempty"`
+}
+
+func (s *Server) handleInputLayout(w http.ResponseWriter, r *http.Request) {
+	if s.node == nil || s.node.InputMgr == nil {
+		http.Error(w, "input sharing not available", http.StatusServiceUnavailable)
+		return
+	}
+	mgr := s.node.InputMgr
+
+	switch r.Method {
+	case http.MethodGet:
+		nodes, links, hotkey, corner := mgr.Settings()
+		hotkeyInts := make([]int, len(hotkey))
+		for i, h := range hotkey {
+			hotkeyInts[i] = int(h)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(inputLayoutPayload{
+			Nodes: nodes, Links: links, HotkeyHID: hotkeyInts,
+			HotCorner: string(corner), LocalNode: mgr.LocalNodeID(),
+		})
+
+	case http.MethodPost:
+		var payload inputLayoutPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid payload", http.StatusBadRequest)
+			return
+		}
+		if err := mgr.SetLayout(payload.Nodes, payload.Links); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		hotkey := make([]inputshare.HIDUsage, len(payload.HotkeyHID))
+		for i, v := range payload.HotkeyHID {
+			hotkey[i] = inputshare.HIDUsage(v)
+		}
+		if err := mgr.SetHotkey(hotkey); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := mgr.SetHotCorner(inputshare.Corner(payload.HotCorner)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true}`))
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleInputStatus reports who currently owns input, for the dashboard's
+// "quem está no controle agora" indicator (task 8.3).
+func (s *Server) handleInputStatus(w http.ResponseWriter, r *http.Request) {
+	if s.node == nil || s.node.InputMgr == nil {
+		http.Error(w, "input sharing not available", http.StatusServiceUnavailable)
+		return
+	}
+	peerID, sending, active := s.node.InputMgr.ActiveSession()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"active":  active,
+		"peer_id": peerID,
+		"sending": sending, // true = this node is controlling peer_id; false = peer_id is controlling this node
+	})
+}
+
+func (s *Server) handleInputPause(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := s.decodeDeviceIDBody(w, r)
+	if !ok {
+		return
+	}
+	s.node.InputMgr.PausePeer(deviceID)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"success":true}`))
+}
+
+func (s *Server) handleInputResume(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := s.decodeDeviceIDBody(w, r)
+	if !ok {
+		return
+	}
+	s.node.InputMgr.ResumePeer(deviceID)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"success":true}`))
+}
+
 // resolveUniqueFilename handles name collisions like "photo.png" -> "photo (1).png"
 func resolveUniqueFilename(dir, filename string) string {
 	dest := filepath.Join(dir, filename)
@@ -568,4 +819,3 @@ func getOutboundIPForServer(target string) string {
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	return localAddr.IP.String()
 }
-

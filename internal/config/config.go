@@ -13,12 +13,56 @@ import (
 
 // TrustedDevice represents a peer device paired via PIN.
 type TrustedDevice struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Token     string    `json:"token"` // Shared mutual authentication token
-	AddedAt   time.Time `json:"added_at"`
-	LastSeen  time.Time `json:"last_seen"`
-	LastAddr  string    `json:"last_addr"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Token    string    `json:"token"` // Shared mutual authentication token
+	AddedAt  time.Time `json:"added_at"`
+	LastSeen time.Time `json:"last_seen"`
+	LastAddr string    `json:"last_addr"`
+
+	// InputControlGranted is whether THIS device has authorized the peer
+	// identified by ID to control its mouse/keyboard (inputshare). It is a
+	// permission separate from pairing itself: pairing only unlocks
+	// clipboard/file sync automatically, input control always requires this
+	// explicit, additional opt-in. Removing the trusted device (unpairing)
+	// removes this flag along with it, so revocation is automatic.
+	InputControlGranted bool `json:"input_control_granted"`
+}
+
+// ScreenNode is one node's logical desktop bounding box in the
+// inputshare screen-arrangement graph (one rectangle per PC, even when it
+// has multiple physical monitors — see openspec/changes/kvm-input-sharing).
+type ScreenNode struct {
+	WidthPx  int `json:"width_px"`
+	HeightPx int `json:"height_px"`
+}
+
+// ScreenLink is one directed border adjacency between two nodes in the
+// layout graph.
+type ScreenLink struct {
+	FromNode string  `json:"from_node"`
+	FromEdge string  `json:"from_edge"` // "top" | "right" | "bottom" | "left"
+	ToNode   string  `json:"to_node"`
+	ToEdge   string  `json:"to_edge"`
+	Offset   float64 `json:"offset"`
+}
+
+// InputShareConfig persists the screen-arrangement layout and the escape
+// mechanisms (hotkey, hot corner) for KVM-style input sharing.
+type InputShareConfig struct {
+	Nodes map[string]ScreenNode `json:"nodes"`
+	Links []ScreenLink          `json:"links"`
+
+	// HotkeyHID is the combination (canonical HID usage codes, as decimal
+	// strings) that always returns input ownership to the physical origin
+	// node, regardless of cursor position.
+	HotkeyHID []int `json:"hotkey_hid"`
+
+	// HotCorner is the reserved screen corner that always returns
+	// ownership when the (injected) cursor touches it, independent of the
+	// configured border links. Empty disables it. One of: "top-left",
+	// "top-right", "bottom-left", "bottom-right".
+	HotCorner string `json:"hot_corner"`
 }
 
 // Config stores local node configuration and trusted peers.
@@ -30,6 +74,7 @@ type Config struct {
 	DownloadDir    string                   `json:"download_dir"`
 	ClipboardSync  bool                     `json:"clipboard_sync"`
 	TrustedDevices map[string]TrustedDevice `json:"trusted_devices"` // key is DeviceID
+	InputShare     InputShareConfig         `json:"input_share"`
 	configPath     string
 }
 
@@ -69,6 +114,7 @@ func Load() (*Config, error) {
 		DownloadDir:    downloadDir,
 		ClipboardSync:  true,
 		TrustedDevices: make(map[string]TrustedDevice),
+		InputShare:     InputShareConfig{Nodes: make(map[string]ScreenNode)},
 		configPath:     cfgPath,
 	}
 
@@ -85,6 +131,9 @@ func Load() (*Config, error) {
 		}
 		if cfg.TrustedDevices == nil {
 			cfg.TrustedDevices = make(map[string]TrustedDevice)
+		}
+		if cfg.InputShare.Nodes == nil {
+			cfg.InputShare.Nodes = make(map[string]ScreenNode)
 		}
 	} else if os.IsNotExist(err) {
 		// Generate unique DeviceID
@@ -177,4 +226,39 @@ func (c *Config) IsClipboardSyncEnabled() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.ClipboardSync
+}
+
+// GetInputShareConfig returns a copy of the persisted screen layout and
+// escape-mechanism settings for KVM-style input sharing.
+func (c *Config) GetInputShareConfig() InputShareConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	nodes := make(map[string]ScreenNode, len(c.InputShare.Nodes))
+	for k, v := range c.InputShare.Nodes {
+		nodes[k] = v
+	}
+	links := make([]ScreenLink, len(c.InputShare.Links))
+	copy(links, c.InputShare.Links)
+	hotkey := make([]int, len(c.InputShare.HotkeyHID))
+	copy(hotkey, c.InputShare.HotkeyHID)
+
+	return InputShareConfig{
+		Nodes:     nodes,
+		Links:     links,
+		HotkeyHID: hotkey,
+		HotCorner: c.InputShare.HotCorner,
+	}
+}
+
+// SetInputShareConfig replaces the persisted screen layout and
+// escape-mechanism settings and saves to disk.
+func (c *Config) SetInputShareConfig(cfg InputShareConfig) error {
+	c.mu.Lock()
+	if cfg.Nodes == nil {
+		cfg.Nodes = make(map[string]ScreenNode)
+	}
+	c.InputShare = cfg
+	c.mu.Unlock()
+	return c.Save()
 }

@@ -3,16 +3,20 @@
 let localNode = null;
 let currentPendingPIN = null;
 let selectedTargetForUpload = null;
+let trustedDevicesCache = [];
 
 document.addEventListener("DOMContentLoaded", () => {
   initApp();
   setupEventListeners();
+  setupKvmEventListeners();
   // Poll every 3 seconds
   setInterval(refreshDevicesAndStatus, 3000);
+  setInterval(refreshKvm, 3000);
 });
 
 async function initApp() {
   await refreshDevicesAndStatus();
+  await refreshKvm();
 }
 
 function setupEventListeners() {
@@ -187,6 +191,7 @@ function renderPendingBanner(pendingList) {
 }
 
 function renderDevices(trusted, discovered) {
+  trustedDevicesCache = trusted;
   const trustedList = document.getElementById("trusted-devices-list");
   const discoveredList = document.getElementById("discovered-devices-list");
   const emptyState = document.getElementById("empty-trusted-state");
@@ -471,4 +476,317 @@ function sendFile(deviceId, file) {
 function escapeHtml(str) {
   if (!str) return "";
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ---------------------------------------------------------------------
+// Input Sharing (KVM): permissions, screen arrangement, escape settings.
+// ---------------------------------------------------------------------
+
+const KVM_TOUCH_TOLERANCE_PX = 12;
+const KVM_DEFAULT_NODE_SIZE = { w: 1920, h: 1080 };
+let kvmLayoutNodes = {}; // id -> { leftPx, topPx, widthRes, heightRes }
+let kvmLocalNodeID = null;
+
+function setupKvmEventListeners() {
+  document.getElementById("btn-save-layout").addEventListener("click", saveKvmLayout);
+  document.getElementById("kvm-hotcorner-select").addEventListener("change", saveKvmLayout);
+}
+
+function kvmCanvasPositionKey() {
+  return "omnidesk-kvm-canvas-positions";
+}
+
+function loadStoredCanvasPositions() {
+  try {
+    const raw = localStorage.getItem(kvmCanvasPositionKey());
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function storeCanvasPositions() {
+  try {
+    const positions = {};
+    for (const id in kvmLayoutNodes) {
+      positions[id] = { left: kvmLayoutNodes[id].leftPx, top: kvmLayoutNodes[id].topPx };
+    }
+    localStorage.setItem(kvmCanvasPositionKey(), JSON.stringify(positions));
+  } catch (e) {
+    // best-effort convenience only
+  }
+}
+
+async function refreshKvm() {
+  try {
+    const [statusResp, pendingResp, layoutResp] = await Promise.all([
+      fetch("/api/v1/input/status"),
+      fetch("/api/v1/input/permission/pending"),
+      fetch("/api/v1/input/layout")
+    ]);
+
+    if (statusResp.ok) {
+      renderKvmStatus(await statusResp.json());
+    }
+    if (pendingResp.ok) {
+      renderKvmPending(await pendingResp.json());
+    }
+    if (layoutResp.ok) {
+      const layout = await layoutResp.json();
+      kvmLocalNodeID = layout.local_node || kvmLocalNodeID;
+      mergeKvmLayoutFromServer(layout);
+      document.getElementById("kvm-hotcorner-select").value = layout.hot_corner || "";
+    }
+
+    renderKvmPermissionList();
+    renderKvmCanvas();
+  } catch (err) {
+    console.warn("Erro ao atualizar KVM:", err);
+  }
+}
+
+function renderKvmStatus(status) {
+  const badge = document.getElementById("kvm-status-badge");
+  if (!status.active) {
+    badge.textContent = "Inativo";
+    badge.className = "badge badge-secondary";
+    return;
+  }
+  const dev = trustedDevicesCache.find(d => d.id === status.peer_id);
+  const name = dev ? dev.name : status.peer_id.substring(0, 8);
+  badge.textContent = status.sending ? `Controlando ${name}` : `Sendo controlado por ${name}`;
+  badge.className = "badge";
+  badge.style.color = "var(--success)";
+  badge.style.borderColor = "var(--success)";
+}
+
+function renderKvmPending(pending) {
+  const el = document.getElementById("kvm-pending-requests");
+  el.innerHTML = "";
+  (pending || []).forEach(req => {
+    const row = document.createElement("div");
+    row.className = "kvm-pending-row";
+    row.innerHTML = `
+      <span><strong>${escapeHtml(req.peer_name || req.peer_id)}</strong> pediu permissão para controlar este computador.</span>
+      <span class="permission-actions">
+        <button class="btn btn-sm btn-success" data-action="approve">Aprovar</button>
+        <button class="btn btn-sm btn-outline" data-action="deny">Recusar</button>
+      </span>
+    `;
+    row.querySelector('[data-action="approve"]').addEventListener("click", async () => {
+      await kvmPost("/api/v1/input/permission/approve", { device_id: req.peer_id });
+      await refreshKvm();
+    });
+    row.querySelector('[data-action="deny"]').addEventListener("click", async () => {
+      await kvmPost("/api/v1/input/permission/deny", { device_id: req.peer_id });
+      await refreshKvm();
+    });
+    el.appendChild(row);
+  });
+}
+
+function renderKvmPermissionList() {
+  const el = document.getElementById("kvm-permission-list");
+  el.innerHTML = "";
+
+  if (trustedDevicesCache.length === 0) {
+    el.innerHTML = `<div class="empty-placeholder"><p>Pareie um dispositivo para liberar controle de mouse/teclado.</p></div>`;
+    return;
+  }
+
+  trustedDevicesCache.forEach(dev => {
+    const row = document.createElement("div");
+    row.className = "permission-row";
+    row.innerHTML = `
+      <span>${escapeHtml(dev.name)}</span>
+      <span class="permission-actions">
+        <button class="btn btn-sm btn-outline" data-action="ask">Pedir controle dele</button>
+        <button class="btn btn-sm btn-outline" data-action="pause">Pausar/Retomar</button>
+      </span>
+    `;
+    row.querySelector('[data-action="ask"]').addEventListener("click", async () => {
+      const r = await kvmPost("/api/v1/input/permission/ask", { device_id: dev.id });
+      if (!r.ok) alert("Não foi possível solicitar controle: " + (r.data && r.data.error ? r.data.error : "dispositivo offline?"));
+    });
+    row.querySelector('[data-action="pause"]').addEventListener("click", async () => {
+      await kvmPost("/api/v1/input/pause", { device_id: dev.id });
+    });
+    el.appendChild(row);
+  });
+}
+
+function mergeKvmLayoutFromServer(layout) {
+  const stored = loadStoredCanvasPositions();
+  const serverNodes = layout.nodes || {};
+  const knownIDs = new Set(Object.keys(kvmLayoutNodes));
+
+  // Ensure the local node and every trusted device has a canvas entry.
+  const allIDs = new Set([kvmLocalNodeID, ...trustedDevicesCache.map(d => d.id)].filter(Boolean));
+  allIDs.forEach(id => knownIDs.add(id));
+
+  let i = 0;
+  knownIDs.forEach(id => {
+    const res = serverNodes[id] || KVM_DEFAULT_NODE_SIZE_FOR(id, layout);
+    const pos = stored[id] || defaultKvmGridPosition(i);
+    kvmLayoutNodes[id] = {
+      leftPx: pos.left,
+      topPx: pos.top,
+      widthRes: res.width_px || KVM_DEFAULT_NODE_SIZE.w,
+      heightRes: res.height_px || KVM_DEFAULT_NODE_SIZE.h
+    };
+    i++;
+  });
+}
+
+function KVM_DEFAULT_NODE_SIZE_FOR(id, layout) {
+  return (layout.nodes && layout.nodes[id]) || {};
+}
+
+function defaultKvmGridPosition(index) {
+  const col = index % 4;
+  const row = Math.floor(index / 4);
+  return { left: 20 + col * 150, top: 20 + row * 100 };
+}
+
+function kvmDeviceName(id) {
+  if (id === kvmLocalNodeID) return (localNode && localNode.device_name) || "Este computador";
+  const dev = trustedDevicesCache.find(d => d.id === id);
+  return dev ? dev.name : id.substring(0, 8);
+}
+
+function renderKvmCanvas() {
+  const canvas = document.getElementById("kvm-layout-canvas");
+  canvas.innerHTML = "";
+
+  Object.keys(kvmLayoutNodes).forEach(id => {
+    const n = kvmLayoutNodes[id];
+    const box = document.createElement("div");
+    box.className = "kvm-node" + (id === kvmLocalNodeID ? " local" : "");
+    box.style.left = n.leftPx + "px";
+    box.style.top = n.topPx + "px";
+    box.dataset.nodeId = id;
+    box.innerHTML = `
+      <div class="kvm-node-name">${escapeHtml(kvmDeviceName(id))}</div>
+      <div class="kvm-node-res">${n.widthRes}x${n.heightRes}</div>
+    `;
+    makeKvmNodeDraggable(box, canvas);
+    canvas.appendChild(box);
+  });
+}
+
+function makeKvmNodeDraggable(box, canvas) {
+  let dragging = false;
+  let offsetX = 0, offsetY = 0;
+
+  box.addEventListener("mousedown", (e) => {
+    dragging = true;
+    box.classList.add("dragging");
+    const rect = box.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    let left = e.clientX - canvasRect.left - offsetX;
+    let top = e.clientY - canvasRect.top - offsetY;
+    left = Math.max(0, Math.min(left, canvasRect.width - box.offsetWidth));
+    top = Math.max(0, Math.min(top, canvasRect.height - box.offsetHeight));
+    box.style.left = left + "px";
+    box.style.top = top + "px";
+    const id = box.dataset.nodeId;
+    if (kvmLayoutNodes[id]) {
+      kvmLayoutNodes[id].leftPx = left;
+      kvmLayoutNodes[id].topPx = top;
+    }
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    box.classList.remove("dragging");
+    storeCanvasPositions();
+  });
+}
+
+// Detects which edges are "touching" between two node rectangles (within
+// KVM_TOUCH_TOLERANCE_PX) and returns the link direction, mirroring the
+// backend's Edge model (specs/screen-layout: adjacency by touching edges).
+function detectKvmEdge(a, b) {
+  const aBox = { l: a.leftPx, t: a.topPx, r: a.leftPx + 120, bo: a.topPx + 80 };
+  const bBox = { l: b.leftPx, t: b.topPx, r: b.leftPx + 120, bo: b.topPx + 80 };
+
+  const verticalOverlap = Math.min(aBox.bo, bBox.bo) - Math.max(aBox.t, bBox.t) > 0;
+  const horizontalOverlap = Math.min(aBox.r, bBox.r) - Math.max(aBox.l, bBox.l) > 0;
+
+  if (verticalOverlap && Math.abs(aBox.r - bBox.l) <= KVM_TOUCH_TOLERANCE_PX) {
+    return "right"; // a's right edge touches b's left edge
+  }
+  if (verticalOverlap && Math.abs(aBox.l - bBox.r) <= KVM_TOUCH_TOLERANCE_PX) {
+    return "left";
+  }
+  if (horizontalOverlap && Math.abs(aBox.bo - bBox.t) <= KVM_TOUCH_TOLERANCE_PX) {
+    return "bottom";
+  }
+  if (horizontalOverlap && Math.abs(aBox.t - bBox.bo) <= KVM_TOUCH_TOLERANCE_PX) {
+    return "top";
+  }
+  return null;
+}
+
+const KVM_OPPOSITE_EDGE = { top: "bottom", bottom: "top", left: "right", right: "left" };
+
+function computeKvmLinksFromCanvas() {
+  const ids = Object.keys(kvmLayoutNodes);
+  const links = [];
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = 0; j < ids.length; j++) {
+      if (i === j) continue;
+      const edge = detectKvmEdge(kvmLayoutNodes[ids[i]], kvmLayoutNodes[ids[j]]);
+      if (edge) {
+        links.push({
+          from_node: ids[i], from_edge: edge,
+          to_node: ids[j], to_edge: KVM_OPPOSITE_EDGE[edge],
+          offset: 0
+        });
+      }
+    }
+  }
+  return links;
+}
+
+async function saveKvmLayout() {
+  const nodes = {};
+  Object.keys(kvmLayoutNodes).forEach(id => {
+    nodes[id] = { width_px: kvmLayoutNodes[id].widthRes, height_px: kvmLayoutNodes[id].heightRes };
+  });
+
+  const payload = {
+    nodes,
+    links: computeKvmLinksFromCanvas(),
+    hotkey_hid: [],
+    hot_corner: document.getElementById("kvm-hotcorner-select").value
+  };
+
+  const r = await kvmPost("/api/v1/input/layout", payload);
+  if (!r.ok) {
+    alert("Falha ao salvar arranjo: " + (r.data && r.data.error ? r.data.error : r.status));
+  }
+}
+
+async function kvmPost(url, body) {
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    let data = {};
+    try { data = await resp.json(); } catch (e) { /* no body */ }
+    return { ok: resp.ok, status: resp.status, data };
+  } catch (err) {
+    return { ok: false, status: 0, data: { error: err.message } };
+  }
 }

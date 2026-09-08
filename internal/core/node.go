@@ -10,6 +10,7 @@ import (
 	"omnidesk/internal/clipboard"
 	"omnidesk/internal/config"
 	"omnidesk/internal/discovery"
+	"omnidesk/internal/inputshare"
 	"omnidesk/internal/notify"
 	"omnidesk/internal/pairing"
 	"omnidesk/internal/transfer"
@@ -17,17 +18,18 @@ import (
 
 // Node represents a running OmniDesk instance with all local services.
 type Node struct {
-	mu           sync.RWMutex
-	Cfg          *config.Config
-	Discovery    *discovery.Service
-	PairingMgr   *pairing.Manager
-	ClipEngine   *clipboard.Engine
-	TransferCli  *transfer.Client
-	Notifier     *notify.Notifier
-	Server       *Server
-	onlinePeers  map[string]discovery.DiscoveredPeer
-	ctx          context.Context
-	cancel       context.CancelFunc
+	mu          sync.RWMutex
+	Cfg         *config.Config
+	Discovery   *discovery.Service
+	PairingMgr  *pairing.Manager
+	ClipEngine  *clipboard.Engine
+	TransferCli *transfer.Client
+	Notifier    *notify.Notifier
+	InputMgr    *inputshare.Manager
+	Server      *Server
+	onlinePeers map[string]discovery.DiscoveredPeer
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 // NewNode initializes all services for a node.
@@ -46,6 +48,7 @@ func NewNode(cfg *config.Config) *Node {
 	}
 
 	n.ClipEngine = clipboard.NewEngine(cfg, n)
+	n.InputMgr = inputshare.NewManager(cfg, n)
 	n.Server = NewServer(cfg, n.PairingMgr, n.ClipEngine, n.Notifier)
 	n.Server.node = n
 	n.Discovery = discovery.NewService(cfg.DeviceID, cfg.DeviceName, cfg.ListenPort, n)
@@ -70,6 +73,12 @@ func (n *Node) Start(ctx context.Context) error {
 	// Start OS clipboard watching
 	if err := n.ClipEngine.Start(n.ctx); err != nil {
 		log.Printf("[node] clipboard watcher warning: %v", err)
+	}
+
+	// Start input-sharing (KVM) capture/injection backend, if the platform
+	// supports one. Degrades gracefully otherwise, exactly like clipboard.
+	if err := n.InputMgr.Start(n.ctx); err != nil {
+		log.Printf("[node] inputshare warning: %v", err)
 	}
 
 	// Start Subnet Probe loop to discover peers over unicast HTTP (bypasses Wi-Fi mDNS blocks)
@@ -116,6 +125,9 @@ func (n *Node) Stop() {
 	if n.ClipEngine != nil {
 		n.ClipEngine.Stop()
 	}
+	if n.InputMgr != nil {
+		n.InputMgr.Stop()
+	}
 	if n.Server != nil {
 		_ = n.Server.Stop()
 	}
@@ -154,6 +166,23 @@ func (n *Node) GetOnlineTrustedPeers() []discovery.DiscoveredPeer {
 		}
 	}
 	return result
+}
+
+// ResolveAddr implements inputshare.PeerResolver, letting the input-sharing
+// manager reuse the same peer discovery/last-known-address data as
+// clipboard broadcast and file transfer instead of tracking its own.
+func (n *Node) ResolveAddr(peerID string) (string, bool) {
+	n.mu.RLock()
+	peer, ok := n.onlinePeers[peerID]
+	n.mu.RUnlock()
+	if ok {
+		return peer.Addr, true
+	}
+
+	if dev, ok := n.Cfg.GetTrustedDevice(peerID); ok && dev.LastAddr != "" {
+		return dev.LastAddr, true
+	}
+	return "", false
 }
 
 // GetAllDiscoveredPeers returns all discovered peers on LAN (paired or unpaired).

@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"time"
 
-	"omnidesk/internal/core"
 	"fyne.io/systray"
+	"omnidesk/internal/core"
 )
 
 // TrayApp manages the system tray icon and menu actions.
@@ -57,15 +57,43 @@ func (t *TrayApp) onReady() {
 	mOpenDownloads := systray.AddMenuItem("Abrir pasta de recebidos", "Abrir ~/Downloads/OmniDesk")
 
 	systray.AddSeparator()
+
+	// Input-sharing (KVM) status/escape item — a quick way to reclaim
+	// mouse/keyboard control without touching the dashboard, per
+	// specs/input-sharing-transport "Pausa de compartilhamento de input
+	// via bandeja/dashboard".
+	mInputStatus := systray.AddMenuItem("Controle remoto: inativo", "Nenhuma sessão de controle de mouse/teclado ativa")
+	mInputStatus.Disable()
+
+	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Sair do OmniDesk", "Encerrar o serviço")
 
-	// Goroutine to periodically update peer counter
+	// Goroutine to periodically update peer counter and input-sharing status
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
 			online := len(t.node.GetOnlineTrustedPeers())
 			mPeers.SetTitle(fmt.Sprintf("Dispositivos conectados: %d", online))
+
+			if t.node.InputMgr == nil {
+				continue
+			}
+			if peerID, sending, active := t.node.InputMgr.ActiveSession(); active {
+				name := peerID
+				if dev, ok := t.node.Cfg.GetTrustedDevice(peerID); ok && dev.Name != "" {
+					name = dev.Name
+				}
+				if sending {
+					mInputStatus.SetTitle(fmt.Sprintf("Controlando %s (clique para encerrar)", name))
+				} else {
+					mInputStatus.SetTitle(fmt.Sprintf("Sendo controlado por %s (clique para encerrar)", name))
+				}
+				mInputStatus.Enable()
+			} else {
+				mInputStatus.SetTitle("Controle remoto: inativo")
+				mInputStatus.Disable()
+			}
 		}
 	}()
 
@@ -87,6 +115,11 @@ func (t *TrayApp) onReady() {
 
 			case <-mOpenDownloads.ClickedCh:
 				openFolder(t.node.Cfg.DownloadDir)
+
+			case <-mInputStatus.ClickedCh:
+				if t.node.InputMgr != nil {
+					t.node.InputMgr.StopSession()
+				}
 
 			case <-mQuit.ClickedCh:
 				systray.Quit()

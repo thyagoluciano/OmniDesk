@@ -1,0 +1,589 @@
+package inputshare
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
+
+	"omnidesk/internal/config"
+)
+
+// Corner identifies one of the four screen corners for the hot-corner
+// escape mechanism (design.md: "hot corner fixo de retorno").
+type Corner string
+
+const (
+	CornerNone        Corner = ""
+	CornerTopLeft     Corner = "top-left"
+	CornerTopRight    Corner = "top-right"
+	CornerBottomLeft  Corner = "bottom-left"
+	CornerBottomRight Corner = "bottom-right"
+)
+
+// cornerToleragePx is how close to the literal corner pixel the cursor must
+// get to count as "hit the corner" — a single-pixel target would be nearly
+// impossible to land on with real mouse hardware.
+const cornerTolerancePx = 4
+
+// PeerResolver resolves a paired peer's current network address. The core
+// package's Node (mDNS discovery + trusted device list) implements this.
+type PeerResolver interface {
+	ResolveAddr(peerID string) (addr string, ok bool)
+}
+
+// activeSession describes the one input-sharing session this node may be
+// part of at a time (design.md Decision 6: ownership is local to a node,
+// not globally coordinated — there is only ever one physical mouse in use).
+type activeSession struct {
+	peerID string
+	r      role
+	conn   *Conn
+}
+
+// Manager wires together the layout graph, the permission model, the
+// platform capture/injection backend and the transport into the KVM-style
+// input-sharing feature described by openspec/changes/kvm-input-sharing.
+type Manager struct {
+	mu sync.Mutex
+
+	cfg      *config.Config
+	resolver PeerResolver
+	perm     *PermissionManager
+	layout   *Layout
+	backend  Backend
+
+	localNodeID string
+	localRect   ScreenRect
+
+	active *activeSession
+
+	// hotkeyCombo is the configured "always return to local" chord; heldSet
+	// tracks which of its keys are currently down while a session is active.
+	hotkeyCombo []HIDUsage
+	heldSet     map[HIDUsage]bool
+	hotCorner   Corner
+
+	// cursorX/cursorY mirror the position this node believes the (locally
+	// injected) cursor is at while receiving from a peer, used only for
+	// hot-corner detection.
+	cursorX, cursorY int
+
+	// pausedPeers holds devices for which input sharing is temporarily
+	// suspended via the tray/dashboard toggle (specs/input-sharing-transport:
+	// "Pausa de compartilhamento de input via bandeja/dashboard") — checked
+	// on both the sending (border-crossing) and receiving (accepting) paths
+	// so a pause is symmetric regardless of which side initiates.
+	pausedPeers map[string]bool
+}
+
+// NewManager constructs a Manager. Start must be called before it does
+// anything.
+func NewManager(cfg *config.Config, resolver PeerResolver) *Manager {
+	ishare := cfg.GetInputShareConfig()
+
+	layout := NewLayout()
+	for id, n := range ishare.Nodes {
+		layout.SetNode(id, ScreenRect{WidthPx: n.WidthPx, HeightPx: n.HeightPx})
+	}
+	for _, l := range ishare.Links {
+		_ = layout.SetLink(Link{
+			FromNode: l.FromNode,
+			FromEdge: Edge(l.FromEdge),
+			ToNode:   l.ToNode,
+			ToEdge:   Edge(l.ToEdge),
+			Offset:   l.Offset,
+		})
+	}
+
+	hotkey := make([]HIDUsage, len(ishare.HotkeyHID))
+	for i, v := range ishare.HotkeyHID {
+		hotkey[i] = HIDUsage(v)
+	}
+
+	return &Manager{
+		cfg:         cfg,
+		resolver:    resolver,
+		perm:        NewPermissionManager(cfg),
+		layout:      layout,
+		localNodeID: cfg.DeviceID,
+		hotkeyCombo: hotkey,
+		heldSet:     make(map[HIDUsage]bool),
+		hotCorner:   Corner(ishare.HotCorner),
+		pausedPeers: make(map[string]bool),
+	}
+}
+
+// Permissions exposes the permission manager for the dashboard/API layer.
+func (m *Manager) Permissions() *PermissionManager { return m.perm }
+
+// Layout exposes the layout graph for the dashboard/API layer.
+func (m *Manager) Layout() *Layout { return m.layout }
+
+// LocalNodeID is this node's own device ID, as used in the layout graph.
+func (m *Manager) LocalNodeID() string { return m.localNodeID }
+
+// PausePeer suspends input sharing with a specific device until ResumePeer
+// is called, ending any session with it that is currently active.
+func (m *Manager) PausePeer(peerID string) {
+	m.mu.Lock()
+	m.pausedPeers[peerID] = true
+	active := m.active
+	m.mu.Unlock()
+
+	if active != nil && active.peerID == peerID {
+		m.StopSession()
+	}
+}
+
+// ResumePeer lifts a pause set by PausePeer.
+func (m *Manager) ResumePeer(peerID string) {
+	m.mu.Lock()
+	delete(m.pausedPeers, peerID)
+	m.mu.Unlock()
+}
+
+func (m *Manager) isPaused(peerID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pausedPeers[peerID]
+}
+
+// Settings returns a snapshot of everything the dashboard needs to render
+// and edit the screen layout and escape mechanisms in one call.
+func (m *Manager) Settings() (nodes map[string]ScreenRect, links []Link, hotkey []HIDUsage, corner Corner) {
+	m.mu.Lock()
+	hotkey = append([]HIDUsage(nil), m.hotkeyCombo...)
+	corner = m.hotCorner
+	m.mu.Unlock()
+	return m.layout.Nodes(), m.layout.Links(), hotkey, corner
+}
+
+// ActiveSession reports the peer currently involved in an input-sharing
+// session with this node, if any (task 8.3: "indicador de qual nó está
+// atualmente em posse do input").
+func (m *Manager) ActiveSession() (peerID string, sending bool, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.active == nil {
+		return "", false, false
+	}
+	return m.active.peerID, m.active.r == roleSender, true
+}
+
+// Start initializes the platform capture/injection backend and begins
+// watching local input for border crossings and the hotkey escape. If no
+// backend exists for this platform/session (e.g. Wayland today), input
+// sharing is disabled but the rest of OmniDesk keeps working — mirroring
+// how clipboard degrades gracefully when running headless.
+func (m *Manager) Start(ctx context.Context) error {
+	backend, err := NewBackend()
+	if err != nil {
+		log.Printf("[inputshare] desabilitado: %v", err)
+		return nil
+	}
+	m.backend = backend
+
+	rect, err := backend.ScreenRect()
+	if err != nil {
+		log.Printf("[inputshare] desabilitado: falha ao ler geometria da tela: %v", err)
+		return nil
+	}
+	m.localRect = rect
+	m.layout.SetNode(m.localNodeID, rect)
+
+	cb := Callbacks{
+		OnMotion: m.handleLocalMotion,
+		OnButton: m.handleLocalButton,
+		OnScroll: m.handleLocalScroll,
+		OnKey:    m.handleLocalKey,
+	}
+	if err := backend.Start(ctx, cb); err != nil {
+		return fmt.Errorf("inputshare: failed to start %s capture: %w", backend.Name(), err)
+	}
+
+	log.Printf("[inputshare] ativo (%s), tela local %dx%d", backend.Name(), rect.WidthPx, rect.HeightPx)
+	return nil
+}
+
+// Stop ends any active session and releases the capture backend.
+func (m *Manager) Stop() {
+	m.StopSession()
+	if m.backend != nil {
+		m.backend.Stop()
+	}
+}
+
+// SetHotkey updates and persists the "always return to local" key chord.
+func (m *Manager) SetHotkey(combo []HIDUsage) error {
+	m.mu.Lock()
+	m.hotkeyCombo = combo
+	m.mu.Unlock()
+	return m.persistLayout()
+}
+
+// SetHotCorner updates and persists the reserved return corner.
+func (m *Manager) SetHotCorner(c Corner) error {
+	m.mu.Lock()
+	m.hotCorner = c
+	m.mu.Unlock()
+	return m.persistLayout()
+}
+
+// SetLayout replaces the screen-arrangement graph and persists it
+// (task 4.4: endpoints to read/save the configured layout).
+func (m *Manager) SetLayout(nodes map[string]ScreenRect, links []Link) error {
+	newLayout := NewLayout()
+	for id, r := range nodes {
+		newLayout.SetNode(id, r)
+	}
+	for _, l := range links {
+		if err := newLayout.SetLink(l); err != nil {
+			return err
+		}
+	}
+	// Always keep this node's own live geometry, even if the caller's
+	// snapshot predates it.
+	newLayout.SetNode(m.localNodeID, m.localRect)
+
+	m.mu.Lock()
+	m.layout = newLayout
+	m.mu.Unlock()
+	return m.persistLayout()
+}
+
+func (m *Manager) persistLayout() error {
+	m.mu.Lock()
+	nodes := m.layout.Nodes()
+	links := m.layout.Links()
+	hotkey := make([]int, len(m.hotkeyCombo))
+	for i, h := range m.hotkeyCombo {
+		hotkey[i] = int(h)
+	}
+	hotCorner := m.hotCorner
+	m.mu.Unlock()
+
+	cfgNodes := make(map[string]config.ScreenNode, len(nodes))
+	for id, r := range nodes {
+		cfgNodes[id] = config.ScreenNode{WidthPx: r.WidthPx, HeightPx: r.HeightPx}
+	}
+	cfgLinks := make([]config.ScreenLink, 0, len(links))
+	for _, l := range links {
+		cfgLinks = append(cfgLinks, config.ScreenLink{
+			FromNode: l.FromNode, FromEdge: string(l.FromEdge),
+			ToNode: l.ToNode, ToEdge: string(l.ToEdge), Offset: l.Offset,
+		})
+	}
+
+	return m.cfg.SetInputShareConfig(config.InputShareConfig{
+		Nodes: cfgNodes, Links: cfgLinks, HotkeyHID: hotkey, HotCorner: string(hotCorner),
+	})
+}
+
+// AcceptSession authorizes and starts the receiving side of an
+// input-sharing session for an already-authenticated HTTP request. It
+// enforces the input-control permission (specs/input-control-permission)
+// and the one-session-at-a-time invariant before ever touching the
+// WebSocket, so an unauthorized or duplicate request gets a normal HTTP
+// error instead of an upgraded-then-closed connection.
+func (m *Manager) AcceptSession(w http.ResponseWriter, r *http.Request, peerID string) error {
+	if m.backend == nil {
+		return fmt.Errorf("inputshare: not available on this platform/session")
+	}
+	if !m.perm.IsGrantedTo(peerID) {
+		return fmt.Errorf("inputshare: peer is not authorized to control this device")
+	}
+	if m.isPaused(peerID) {
+		return fmt.Errorf("inputshare: sharing with this peer is paused")
+	}
+
+	m.mu.Lock()
+	if m.active != nil {
+		m.mu.Unlock()
+		return fmt.Errorf("inputshare: a session is already active")
+	}
+	m.mu.Unlock()
+
+	conn, err := Accept(w, r, peerID)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	m.active = &activeSession{peerID: peerID, r: roleReceiver, conn: conn}
+	m.cursorX, m.cursorY = m.localRect.WidthPx/2, m.localRect.HeightPx/2
+	m.mu.Unlock()
+
+	conn.SetReceiverHandlers(m.injectAndTrack, func() { m.clearSession(peerID) })
+	conn.Start()
+	log.Printf("[inputshare] recebendo controle de %s", peerID)
+	return nil
+}
+
+// injectAndTrack forwards a received event to the platform backend while
+// mirroring the resulting cursor position, so hot-corner detection works
+// without querying the OS on every event.
+func (m *Manager) injectAndTrack(ev Event) error {
+	m.mu.Lock()
+	switch e := ev.(type) {
+	case MouseWarpEvent:
+		m.cursorX, m.cursorY = int(e.X), int(e.Y)
+	case MouseMoveEvent:
+		m.cursorX += int(e.DX)
+		m.cursorY += int(e.DY)
+	}
+	x, y := m.cursorX, m.cursorY
+	corner := m.hotCorner
+	active := m.active
+	m.mu.Unlock()
+
+	if corner != CornerNone && active != nil && hitsCorner(x, y, m.localRect, corner) {
+		active.conn.SendRequestReturn()
+	}
+
+	return m.backend.Inject(ev)
+}
+
+func hitsCorner(x, y int, rect ScreenRect, c Corner) bool {
+	near := func(v, edge int) bool {
+		d := v - edge
+		if d < 0 {
+			d = -d
+		}
+		return d <= cornerTolerancePx
+	}
+	switch c {
+	case CornerTopLeft:
+		return near(x, 0) && near(y, 0)
+	case CornerTopRight:
+		return near(x, rect.WidthPx-1) && near(y, 0)
+	case CornerBottomLeft:
+		return near(x, 0) && near(y, rect.HeightPx-1)
+	case CornerBottomRight:
+		return near(x, rect.WidthPx-1) && near(y, rect.HeightPx-1)
+	default:
+		return false
+	}
+}
+
+// RequestControlOf asks a paired peer to grant this node permission to
+// control it, over the normal authenticated peer-to-peer HTTP API (not the
+// input WebSocket). The peer's dashboard surfaces the request for a human
+// to approve (specs/input-control-permission: "Concessão de permissão exige
+// confirmação explícita nas duas pontas").
+func (m *Manager) RequestControlOf(ctx context.Context, peerID string) error {
+	addr, ok := m.resolver.ResolveAddr(peerID)
+	if !ok {
+		return fmt.Errorf("inputshare: peer %s is not currently reachable", peerID)
+	}
+	dev, ok := m.cfg.GetTrustedDevice(peerID)
+	if !ok {
+		return fmt.Errorf("inputshare: peer %s is not paired", peerID)
+	}
+	return sendPermissionRequest(ctx, addr, m.cfg.DeviceID, m.cfg.DeviceName, dev.Token)
+}
+
+// StopSession ends whatever session is currently active, regardless of
+// role. As the sender, it proactively tells the peer to release everything
+// before closing (design.md Decision 7's "best effort" half — the
+// receiver's self-sufficient failsafe covers the rest). This is the
+// implementation behind all three escape mechanisms (hotkey, hot corner,
+// bandeja/dashboard toggle) and behind a clean edge-triggered handoff back.
+func (m *Manager) StopSession() {
+	m.mu.Lock()
+	active := m.active
+	m.active = nil
+	m.heldSet = make(map[HIDUsage]bool)
+	m.mu.Unlock()
+
+	if active == nil {
+		return
+	}
+	if active.r == roleSender {
+		active.conn.SendReleaseAll()
+	}
+	active.conn.Close()
+	log.Printf("[inputshare] sessão com %s encerrada", active.peerID)
+}
+
+func (m *Manager) clearSession(peerID string) {
+	m.mu.Lock()
+	if m.active != nil && m.active.peerID == peerID {
+		m.active = nil
+		m.heldSet = make(map[HIDUsage]bool)
+	}
+	m.mu.Unlock()
+}
+
+// handleLocalMotion is the capture backend's pointer-motion callback. While
+// idle it watches for the cursor reaching a screen edge with a configured
+// neighbor; while sending, it forwards motion to the peer.
+func (m *Manager) handleLocalMotion(absX, absY int, dx, dy int16) {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+
+	if active != nil {
+		if active.r == roleSender {
+			active.conn.SendMove(dx, dy)
+		}
+		return
+	}
+
+	edge, along, atEdge := m.edgeAt(absX, absY)
+	if !atEdge {
+		return
+	}
+	m.tryBeginSending(edge, along)
+}
+
+// edgeAt reports which screen edge (absX, absY) is touching, if any, along
+// with the coordinate that runs along that edge.
+func (m *Manager) edgeAt(absX, absY int) (edge Edge, along int, ok bool) {
+	w, h := m.localRect.WidthPx, m.localRect.HeightPx
+	switch {
+	case absX <= 0:
+		return EdgeLeft, absY, true
+	case absX >= w-1:
+		return EdgeRight, absY, true
+	case absY <= 0:
+		return EdgeTop, absX, true
+	case absY >= h-1:
+		return EdgeBottom, absX, true
+	default:
+		return "", 0, false
+	}
+}
+
+// tryBeginSending looks up the configured neighbor for the crossed edge and,
+// if this node is authorized to control it, dials out and becomes the
+// session's sender (specs/screen-layout: "Transição de borda dispara
+// mudança de posse de input").
+func (m *Manager) tryBeginSending(edge Edge, along int) {
+	crossing, ok := m.layout.Cross(m.localNodeID, edge, along)
+	if !ok {
+		return // no neighbor configured on this edge — nothing to do, OS clamps the cursor on its own
+	}
+	peerID := crossing.ToNode
+	if m.isPaused(peerID) {
+		return
+	}
+
+	addr, ok := m.resolver.ResolveAddr(peerID)
+	if !ok {
+		return // peer offline; stay local
+	}
+	dev, ok := m.cfg.GetTrustedDevice(peerID)
+	if !ok || dev.Token == "" {
+		return
+	}
+
+	entryX, entryY := warpEntryPoint(crossing, m.layout.Nodes()[peerID])
+
+	ctx := context.Background()
+	conn, err := DialSender(ctx, addr, m.cfg.DeviceID, dev.Token, peerID)
+	if err != nil {
+		log.Printf("[inputshare] não foi possível iniciar controle de %s: %v", peerID, err)
+		return
+	}
+
+	m.mu.Lock()
+	if m.active != nil {
+		// Lost a race with an incoming session; abandon this attempt.
+		m.mu.Unlock()
+		conn.Close()
+		return
+	}
+	m.active = &activeSession{peerID: peerID, r: roleSender, conn: conn}
+	m.heldSet = make(map[HIDUsage]bool)
+	m.mu.Unlock()
+
+	conn.SetSenderHandlers(func() { m.StopSession() })
+	conn.Start()
+	conn.SendWarp(entryX, entryY)
+	log.Printf("[inputshare] controlando %s", peerID)
+}
+
+// warpEntryPoint turns a Crossing (which already carries the scaled
+// along-edge coordinate) into a full (X, Y) pair in the destination's pixel
+// space, placing the fixed coordinate just inside the entry edge.
+func warpEntryPoint(c Crossing, dst ScreenRect) (x, y uint16) {
+	const inset = 1
+	switch c.ToEdge {
+	case EdgeLeft:
+		return inset, uint16(clampInt(c.AlongPx, 0, dst.HeightPx-1))
+	case EdgeRight:
+		return uint16(dst.WidthPx - 1 - inset), uint16(clampInt(c.AlongPx, 0, dst.HeightPx-1))
+	case EdgeTop:
+		return uint16(clampInt(c.AlongPx, 0, dst.WidthPx-1)), inset
+	case EdgeBottom:
+		return uint16(clampInt(c.AlongPx, 0, dst.WidthPx-1)), uint16(dst.HeightPx - 1 - inset)
+	default:
+		return 0, 0
+	}
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func (m *Manager) handleLocalButton(btn MouseButton, pressed bool) {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+	if active != nil && active.r == roleSender {
+		active.conn.SendButton(btn, pressed)
+	}
+}
+
+func (m *Manager) handleLocalScroll(dx, dy int16) {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+	if active != nil && active.r == roleSender {
+		active.conn.SendScroll(dx, dy)
+	}
+}
+
+// handleLocalKey forwards key events while sending, and — before
+// forwarding — checks whether the physical origin's hotkey chord is now
+// fully held, in which case it swallows the combo and reclaims local
+// control instead of forwarding it (design.md: "hotkey global de retorno").
+func (m *Manager) handleLocalKey(hid HIDUsage, pressed bool) {
+	m.mu.Lock()
+	active := m.active
+	if active == nil || active.r != roleSender {
+		m.mu.Unlock()
+		return
+	}
+
+	if pressed {
+		m.heldSet[hid] = true
+	} else {
+		delete(m.heldSet, hid)
+	}
+	hotkeyMatched := len(m.hotkeyCombo) > 0 && allHeld(m.heldSet, m.hotkeyCombo)
+	m.mu.Unlock()
+
+	if hotkeyMatched {
+		m.StopSession()
+		return
+	}
+	active.conn.SendKey(hid, pressed)
+}
+
+func allHeld(held map[HIDUsage]bool, combo []HIDUsage) bool {
+	for _, hid := range combo {
+		if !held[hid] {
+			return false
+		}
+	}
+	return true
+}
