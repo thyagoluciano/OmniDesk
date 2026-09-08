@@ -1,19 +1,19 @@
 # peer-discovery Specification
 
 ## Purpose
-Permite que instâncias do Crossover se descubram dinamicamente na rede local (LAN) e estabeleçam relações de confiança mútua através de um pareamento seguro com PIN de 6 dígitos.
+Permite que instâncias do OmniDesk se descubram dinamicamente na rede local (LAN) e estabeleçam relações de confiança mútua através de um pareamento seguro com PIN de 6 dígitos.
 
 ## Requirements
 
 ### Requirement: Local Peer Announcement and Discovery
-The system SHALL / O nó do Crossover DEVE anunciar sua presença na rede local via mDNS e escutar por outros nós ativos na mesma rede sem requerer configuração manual de endereços IP.
+The system SHALL / O nó do OmniDesk DEVE anunciar sua presença na rede local via mDNS e escutar por outros nós ativos na mesma rede sem requerer configuração manual de endereços IP.
 
 #### Scenario: Anúncio de novo nó na rede
-- **WHEN** o serviço Crossover é iniciado em uma máquina
+- **WHEN** o serviço OmniDesk é iniciado em uma máquina
 - **THEN** ele publica um registro mDNS com nome do dispositivo, identificador único e porta de comunicação local
 
 #### Scenario: Descoberta de nós existentes
-- **WHEN** outros nós do Crossover estão ativos na mesma sub-rede
+- **WHEN** outros nós do OmniDesk estão ativos na mesma sub-rede
 - **THEN** o nó local identifica automaticamente seus identificadores, nomes e endereços de rede dentro de 5 segundos
 
 ### Requirement: PIN-Based Mutual Device Pairing

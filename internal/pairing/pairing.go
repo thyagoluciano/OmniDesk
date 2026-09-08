@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"crossover/internal/config"
+	"omnidesk/internal/config"
 )
 
 // Session represents an active pairing handshake.

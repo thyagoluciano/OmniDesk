@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"crossover/internal/core"
+	"omnidesk/internal/core"
 )
 
 type TrayApp struct {

@@ -77,7 +77,7 @@ func main() {
 		}
 	}
 
-	// Draw crisp intersecting arrows / crossover cross
+	// Draw crisp intersecting arrows / omnidesk cross
 	white := color.RGBA{255, 255, 255, 255}
 	strokeWidth := 10.0
 
@@ -93,7 +93,7 @@ func main() {
 	drawLine(img, 140, 184, 184, 184, strokeWidth, white)
 	drawLine(img, 184, 184, 184, 140, strokeWidth, white)
 
-	f, err := os.Create("assets/crossover.png")
+	f, err := os.Create("assets/omnidesk.png")
 	if err != nil {
 		log.Fatalf("Cannot create file: %v", err)
 	}
@@ -103,7 +103,7 @@ func main() {
 		log.Fatalf("Cannot encode PNG: %v", err)
 	}
 
-	log.Println("assets/crossover.png generated successfully.")
+	log.Println("assets/omnidesk.png generated successfully.")
 }
 
 func drawLine(img *image.RGBA, x0, y0, x1, y1 float64, width float64, c color.Color) {

@@ -19,13 +19,13 @@ import (
 	"syscall"
 	"time"
 
-	"crossover/internal/config"
-	"crossover/internal/core"
-	"crossover/internal/discovery"
-	"crossover/internal/installer"
-	"crossover/internal/pairing"
-	"crossover/internal/transfer"
-	"crossover/internal/ui"
+	"omnidesk/internal/config"
+	"omnidesk/internal/core"
+	"omnidesk/internal/discovery"
+	"omnidesk/internal/installer"
+	"omnidesk/internal/pairing"
+	"omnidesk/internal/transfer"
+	"omnidesk/internal/ui"
 )
 
 const version = "0.1.0"
@@ -62,7 +62,7 @@ func main() {
 	case "send":
 		runSend(os.Args[2:])
 	case "version", "--version", "-v":
-		fmt.Printf("Crossover version %s\n", version)
+		fmt.Printf("OmniDesk version %s\n", version)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -73,25 +73,25 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`Crossover - Sincronização P2P de Clipboard e Arquivos para macOS e Linux
+	fmt.Println(`OmniDesk - Sincronização P2P de Clipboard e Arquivos para macOS e Linux
 
 Uso:
-  crossover                   Inicia o agente Crossover com ícone no tray
-  crossover <comando> [argumentos]
+  omnidesk                   Inicia o agente OmniDesk com ícone no tray
+  omnidesk <comando> [argumentos]
 
 Comandos disponíveis:
-  daemon               Inicia o agente Crossover em segundo plano
+  daemon               Inicia o agente OmniDesk em segundo plano
                        Opções: --headless (roda sem interface gráfica)
-  install              Instala o Crossover no sistema com ícone e autostart
+  install              Instala o OmniDesk no sistema com ícone e autostart
                        Opções: --autostart=false (não iniciar no login)
-  uninstall            Remove o Crossover e o serviço de inicialização
+  uninstall            Remove o OmniDesk e o serviço de inicialização
   status               Exibe o estado atual do nó local e configurações
   devices              Descobre e lista os dispositivos na rede local (LAN)
   gui                  Abre o painel gráfico de controle no navegador/janela
   pair <dispositivo>   Inicia o pareamento com PIN de 6 dígitos com outro nó
                        Opções: --approve <session_id> (aprova solicitação recebida)
   send <arquivo> <alvo> Envia um arquivo diretamente para um dispositivo pareado
-  version              Exibe a versão do Crossover
+  version              Exibe a versão do OmniDesk
   help                 Exibe esta ajuda`)
 }
 
@@ -131,7 +131,7 @@ func runGUI(args []string) {
 	if err == nil && cfg.ListenPort > 0 {
 		port = cfg.ListenPort
 	}
-	fmt.Printf("Abrindo painel do Crossover (porta %d)...\n", port)
+	fmt.Printf("Abrindo painel do OmniDesk (porta %d)...\n", port)
 	ui.OpenDashboard(port)
 }
 
@@ -155,18 +155,18 @@ func runDaemon(args []string) {
 	defer cancel()
 
 	if err := node.Start(ctx); err != nil {
-		log.Fatalf("Erro ao iniciar nó Crossover: %v", err)
+		log.Fatalf("Erro ao iniciar nó OmniDesk: %v", err)
 	}
 
 	fmt.Println("=====================================================")
-	fmt.Printf("  Crossover v%s ativo e monitorando\n", version)
+	fmt.Printf("  OmniDesk v%s ativo e monitorando\n", version)
 	fmt.Printf("  Nó:    %s (ID: %s)\n", cfg.DeviceName, cfg.DeviceID)
 	fmt.Printf("  Porta: %d\n", cfg.ListenPort)
 	fmt.Printf("  Pasta: %s\n", cfg.DownloadDir)
 	fmt.Println("=====================================================")
 
 	// Send desktop notification confirming startup
-	_ = node.Notifier.SendNotification("Crossover Conectado", fmt.Sprintf("Nó '%s' ativo na porta %d", cfg.DeviceName, cfg.ListenPort))
+	_ = node.Notifier.SendNotification("OmniDesk Conectado", fmt.Sprintf("Nó '%s' ativo na porta %d", cfg.DeviceName, cfg.ListenPort))
 
 	// Graceful shutdown on SIGINT / SIGTERM
 	sigCh := make(chan os.Signal, 1)
@@ -174,16 +174,16 @@ func runDaemon(args []string) {
 
 	go func() {
 		<-sigCh
-		log.Println("Encerrando Crossover...")
+		log.Println("Encerrando OmniDesk...")
 		node.Stop()
 		cancel()
 		os.Exit(0)
 	}()
 
 	// If headless or no display, wait on signals
-	hasDisplay := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "" || isDarwin()
+	hasDisplay := os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "" || runtime.GOOS == "darwin"
 	if *headless || !hasDisplay {
-		fmt.Println("[crossover] Executando em modo headless (sem bandeja). Pressione Ctrl+C para sair.")
+		fmt.Println("[omnidesk] Executando em modo headless (sem bandeja). Pressione Ctrl+C para sair.")
 		select {}
 	} else {
 		fmt.Println("Ícone adicionado na barra superior do sistema (tray).")
@@ -192,10 +192,6 @@ func runDaemon(args []string) {
 		tray := ui.NewTrayApp(node)
 		tray.Start()
 	}
-}
-
-func isDarwin() bool {
-	return filepath.Separator == '/' && os.Getenv("TERM_PROGRAM") != ""
 }
 
 func runStatus(args []string) {
@@ -219,7 +215,7 @@ func runStatus(args []string) {
 		statusStr = "Ativo (online)"
 	}
 
-	fmt.Printf("=== Estado do Crossover ===\n")
+	fmt.Printf("=== Estado do OmniDesk ===\n")
 	fmt.Printf("Status do Daemon:   %s\n", statusStr)
 	fmt.Printf("Nome do Nó:         %s\n", cfg.DeviceName)
 	fmt.Printf("Identificador (ID): %s\n", cfg.DeviceID)
@@ -230,7 +226,7 @@ func runStatus(args []string) {
 	trusted := cfg.ListTrustedDevices()
 	fmt.Printf("\nDispositivos Confiáveis Cadastrados (%d):\n", len(trusted))
 	if len(trusted) == 0 {
-		fmt.Println("  (Nenhum dispositivo pareado ainda. Use 'crossover pair' para conectar).")
+		fmt.Println("  (Nenhum dispositivo pareado ainda. Use 'omnidesk pair' para conectar).")
 	} else {
 		for _, dev := range trusted {
 			lastSeen := "Nunca"
@@ -249,7 +245,7 @@ func runDevices(args []string) {
 		log.Fatalf("Erro ao carregar configurações: %v", err)
 	}
 
-	fmt.Println("Buscando dispositivos Crossover na rede local (mDNS + Varredura de sub-rede)...")
+	fmt.Println("Buscando dispositivos OmniDesk na rede local (mDNS + Varredura de sub-rede)...")
 
 	peerMap := make(map[string]discovery.DiscoveredPeer)
 
@@ -274,9 +270,9 @@ func runDevices(args []string) {
 
 	fmt.Printf("\nDispositivos encontrados na LAN (%d):\n", len(peerMap))
 	if len(peerMap) == 0 {
-		fmt.Println("  Nenhum outro nó Crossover detectado.")
+		fmt.Println("  Nenhum outro nó OmniDesk detectado.")
 		fmt.Println("  Dica: você pode parear diretamente usando o IP do outro computador:")
-		fmt.Println("  Exemplo: crossover pair <ip-do-outro-computador>")
+		fmt.Println("  Exemplo: omnidesk pair <ip-do-outro-computador>")
 		return
 	}
 
@@ -314,7 +310,7 @@ func runPair(args []string) {
 		return
 	}
 
-	// Case 3: First argument is a 6-digit numeric PIN (e.g. "crossover pair 582914")
+	// Case 3: First argument is a 6-digit numeric PIN (e.g. "omnidesk pair 582914")
 	if len(remaining) == 1 && isNumericPin(remaining[0]) {
 		approveViaDaemon(cfg.ListenPort, remaining[0])
 		return
@@ -367,7 +363,7 @@ func runPair(args []string) {
 
 	if targetAddr == "" {
 		fmt.Fprintf(os.Stderr, "Dispositivo '%s' não encontrado na rede local.\n", target)
-		fmt.Fprintf(os.Stderr, "Dica: Tente conectar diretamente pelo IP: crossover pair <ip-do-dispositivo>\n")
+		fmt.Fprintf(os.Stderr, "Dica: Tente conectar diretamente pelo IP: omnidesk pair <ip-do-dispositivo>\n")
 		os.Exit(1)
 	}
 
@@ -396,8 +392,8 @@ func runPair(args []string) {
 			fmt.Printf("✓ PAREAMENTO COM '%s' CONCLUÍDO COM SUCESSO!\n", session.ResponderName)
 			fmt.Println("=======================================================")
 			fmt.Println("Para ativar a sincronização contínua de clipboard e arquivos,")
-			fmt.Println("inicie o Crossover agora executando:")
-			fmt.Println("  ./crossover-mac")
+			fmt.Println("inicie o OmniDesk agora executando:")
+			fmt.Println("  ./omnidesk-mac")
 			fmt.Println("=======================================================")
 			return
 		}
@@ -408,7 +404,7 @@ func runPair(args []string) {
 
 func runSend(args []string) {
 	if len(args) < 2 {
-		fmt.Println("Uso: crossover send <caminho-do-arquivo> <dispositivo-alvo>")
+		fmt.Println("Uso: omnidesk send <caminho-do-arquivo> <dispositivo-alvo>")
 		return
 	}
 
@@ -436,7 +432,7 @@ func runSend(args []string) {
 	}
 
 	if targetDev == nil {
-		fmt.Fprintf(os.Stderr, "Dispositivo '%s' não encontrado na lista de dispositivos confiáveis.\nExecute 'crossover status' para ver os nós pareados.\n", target)
+		fmt.Fprintf(os.Stderr, "Dispositivo '%s' não encontrado na lista de dispositivos confiáveis.\nExecute 'omnidesk status' para ver os nós pareados.\n", target)
 		os.Exit(1)
 	}
 
@@ -510,7 +506,7 @@ func approveViaDaemon(port int, pin string) {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Post(url, "application/json", bytes.NewReader(reqBody))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Erro ao contatar daemon local: %v\nO Crossover precisa estar em execução nesta máquina ('crossover daemon').\n", err)
+		fmt.Fprintf(os.Stderr, "Erro ao contatar daemon local: %v\nO OmniDesk precisa estar em execução nesta máquina ('omnidesk daemon').\n", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -538,8 +534,8 @@ func checkPendingViaDaemon(port int) {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		fmt.Println("Uso: crossover pair <ip-ou-nome-do-dispositivo> (para solicitar pareamento)")
-		fmt.Println("     crossover pair <PIN-de-6-digitos>          (para autorizar pareamento)")
+		fmt.Println("Uso: omnidesk pair <ip-ou-nome-do-dispositivo> (para solicitar pareamento)")
+		fmt.Println("     omnidesk pair <PIN-de-6-digitos>          (para autorizar pareamento)")
 		return
 	}
 	defer resp.Body.Close()
@@ -548,8 +544,8 @@ func checkPendingViaDaemon(port int) {
 	if err := json.NewDecoder(resp.Body).Decode(&pending); err != nil || len(pending) == 0 {
 		fmt.Println("Nenhuma solicitação de pareamento pendente encontrada no momento.")
 		fmt.Println("\nUso:")
-		fmt.Println("  crossover pair <ip-ou-nome>        (conectar a outro nó)")
-		fmt.Println("  crossover pair <PIN-de-6-digitos>  (autorizar pareamento)")
+		fmt.Println("  omnidesk pair <ip-ou-nome>        (conectar a outro nó)")
+		fmt.Println("  omnidesk pair <PIN-de-6-digitos>  (autorizar pareamento)")
 		return
 	}
 

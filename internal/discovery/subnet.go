@@ -16,7 +16,7 @@ type statusResponse struct {
 	Status     string `json:"status"`
 }
 
-// ProbeSubnet scans local subnets on the Crossover port for active nodes.
+// ProbeSubnet scans local subnets on the OmniDesk port for active nodes.
 // This guarantees discovery even when Wi-Fi routers block mDNS multicast.
 func ProbeSubnet(ctx context.Context, port int, myID string) []DiscoveredPeer {
 	var peers []DiscoveredPeer

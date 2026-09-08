@@ -33,13 +33,13 @@ type Config struct {
 	configPath     string
 }
 
-// DefaultConfigDir returns the default directory for crossover configuration.
+// DefaultConfigDir returns the default directory for omnidesk configuration.
 func DefaultConfigDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".config", "crossover")
+	return filepath.Join(home, ".config", "omnidesk")
 }
 
 // DefaultDownloadDir returns the default inbound folder.
@@ -48,7 +48,7 @@ func DefaultDownloadDir() string {
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, "Downloads", "Crossover")
+	return filepath.Join(home, "Downloads", "OmniDesk")
 }
 
 // Load loads the configuration from disk, creating default values if missing.
@@ -74,7 +74,7 @@ func Load() (*Config, error) {
 
 	hostname, _ := os.Hostname()
 	if hostname == "" {
-		hostname = "Crossover-Node"
+		hostname = "OmniDesk-Node"
 	}
 	cfg.DeviceName = hostname
 

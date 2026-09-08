@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <defs>
-    <linearGradient id="crossover-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="omnidesk-grad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#0284c7" />
       <stop offset="100%" stop-color="#06b6d4" />
     </linearGradient>
@@ -9,7 +9,7 @@
     </filter>
   </defs>
   <!-- Background rounded rectangle -->
-  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#crossover-grad)" filter="url(#shadow)" />
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#omnidesk-grad)" filter="url(#shadow)" />
   
   <!-- Intersecting arrows symbol -->
   <g fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">

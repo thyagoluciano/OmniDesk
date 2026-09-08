@@ -12,7 +12,7 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
-const ServiceName = "_crossover._tcp"
+const ServiceName = "_omnidesk._tcp"
 const Domain = "local."
 
 // DiscoveredPeer represents an active peer announced via mDNS.
@@ -31,7 +31,7 @@ type PeerHandler interface {
 	OnPeerLost(peerID string)
 }
 
-// Service manages announcing this node and browsing for other crossover nodes.
+// Service manages announcing this node and browsing for other omnidesk nodes.
 type Service struct {
 	mu         sync.RWMutex
 	deviceID   string

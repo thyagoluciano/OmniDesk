@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"crossover/internal/config"
-	"crossover/internal/core"
-	"crossover/internal/discovery"
+	"omnidesk/internal/config"
+	"omnidesk/internal/core"
+	"omnidesk/internal/discovery"
 )
 
 func TestFullE2EFlow(t *testing.T) {

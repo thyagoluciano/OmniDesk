@@ -3,7 +3,7 @@ set -e
 
 VERSION="0.1.0"
 ARCH="amd64"
-PKG_NAME="crossover_${VERSION}_${ARCH}"
+PKG_NAME="omnidesk_${VERSION}_${ARCH}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
 PKG_DIR="${DIST_DIR}/${PKG_NAME}"
@@ -19,24 +19,24 @@ mkdir -p "${PKG_DIR}/usr/lib/systemd/user"
 
 echo "==> Compilando binário Linux amd64..."
 cd "${ROOT_DIR}"
-go build -ldflags="-s -w" -o "${PKG_DIR}/usr/bin/crossover" ./cmd/crossover
+go build -ldflags="-s -w" -o "${PKG_DIR}/usr/bin/omnidesk" ./cmd/omnidesk
 
 echo "==> Copiando recursos e assets..."
-cp "${ROOT_DIR}/assets/crossover.desktop" "${PKG_DIR}/usr/share/applications/"
-cp "${ROOT_DIR}/assets/crossover.png" "${PKG_DIR}/usr/share/icons/hicolor/256x256/apps/"
-cp "${ROOT_DIR}/assets/crossover.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
-cp "${ROOT_DIR}/assets/crossover.service" "${PKG_DIR}/usr/lib/systemd/user/"
+cp "${ROOT_DIR}/assets/omnidesk.desktop" "${PKG_DIR}/usr/share/applications/"
+cp "${ROOT_DIR}/assets/omnidesk.png" "${PKG_DIR}/usr/share/icons/hicolor/256x256/apps/"
+cp "${ROOT_DIR}/assets/omnidesk.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
+cp "${ROOT_DIR}/assets/omnidesk.service" "${PKG_DIR}/usr/lib/systemd/user/"
 
 echo "==> Gerando DEBIAN/control..."
 cat <<EOF > "${PKG_DIR}/DEBIAN/control"
-Package: crossover
+Package: omnidesk
 Version: ${VERSION}
 Section: net
 Priority: optional
 Architecture: ${ARCH}
-Maintainer: Crossover Team <thyagoluciano@gmail.com>
+Maintainer: OmniDesk Team <thyagoluciano@gmail.com>
 Description: Sincronizacao P2P de Clipboard e Arquivos em Rede Local
- Crossover e uma ferramenta ultraleve para sincronizacao em tempo real de
+ OmniDesk e uma ferramenta ultraleve para sincronizacao em tempo real de
  area de transferencia e transferencia de arquivos direta entre Linux e macOS.
 EOF
 

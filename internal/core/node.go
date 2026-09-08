@@ -7,15 +7,15 @@ import (
 	"sync"
 	"time"
 
-	"crossover/internal/clipboard"
-	"crossover/internal/config"
-	"crossover/internal/discovery"
-	"crossover/internal/notify"
-	"crossover/internal/pairing"
-	"crossover/internal/transfer"
+	"omnidesk/internal/clipboard"
+	"omnidesk/internal/config"
+	"omnidesk/internal/discovery"
+	"omnidesk/internal/notify"
+	"omnidesk/internal/pairing"
+	"omnidesk/internal/transfer"
 )
 
-// Node represents a running Crossover instance with all local services.
+// Node represents a running OmniDesk instance with all local services.
 type Node struct {
 	mu           sync.RWMutex
 	Cfg          *config.Config
@@ -42,7 +42,7 @@ func NewNode(cfg *config.Config) *Node {
 	n.PairingMgr = pairing.NewManager(cfg)
 	n.PairingMgr.OnPrompt = func(sess *pairing.Session) {
 		msg := fmt.Sprintf("Pareamento solicitado por %s. PIN: %s", sess.RequesterName, sess.PIN)
-		_ = n.Notifier.SendNotification("Crossover - Pareamento", msg)
+		_ = n.Notifier.SendNotification("OmniDesk - Pareamento", msg)
 	}
 
 	n.ClipEngine = clipboard.NewEngine(cfg, n)
@@ -75,7 +75,7 @@ func (n *Node) Start(ctx context.Context) error {
 	// Start Subnet Probe loop to discover peers over unicast HTTP (bypasses Wi-Fi mDNS blocks)
 	go n.subnetProbeLoop(n.ctx)
 
-	log.Printf("[node] Crossover running as '%s' (ID: %s) on port %d", n.Cfg.DeviceName, n.Cfg.DeviceID, n.Cfg.ListenPort)
+	log.Printf("[node] OmniDesk running as '%s' (ID: %s) on port %d", n.Cfg.DeviceName, n.Cfg.DeviceID, n.Cfg.ListenPort)
 	return nil
 }
 

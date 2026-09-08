@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"crossover/internal/config"
-	"crossover/internal/discovery"
-	"crossover/internal/pairing"
-	"crossover/web"
+	"omnidesk/internal/config"
+	"omnidesk/internal/discovery"
+	"omnidesk/internal/pairing"
+	"omnidesk/web"
 )
 
 // ClipboardHandler handles incoming remote clipboard text.
@@ -30,7 +30,7 @@ type FileNotificationHandler interface {
 	NotifyFileReceived(fileName, senderName string, sizeBytes int64)
 }
 
-// Server handles all inbound HTTP requests for Crossover.
+// Server handles all inbound HTTP requests for OmniDesk.
 type Server struct {
 	mu          sync.RWMutex
 	cfg         *config.Config
@@ -112,8 +112,8 @@ func (s *Server) Stop() error {
 
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		devID := r.Header.Get("X-Crossover-Device-ID")
-		token := r.Header.Get("X-Crossover-Token")
+		devID := r.Header.Get("X-OmniDesk-Device-ID")
+		token := r.Header.Get("X-OmniDesk-Token")
 
 		if devID == "" || token == "" {
 			http.Error(w, "missing authentication headers", http.StatusUnauthorized)
@@ -275,11 +275,11 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	senderID := r.Header.Get("X-Crossover-Device-ID")
+	senderID := r.Header.Get("X-OmniDesk-Device-ID")
 	senderDev, _ := s.cfg.GetTrustedDevice(senderID)
 	senderName := senderDev.Name
 	if senderName == "" {
-		senderName = "Dispositivo Crossover"
+		senderName = "Dispositivo OmniDesk"
 	}
 
 	fileName := r.URL.Query().Get("filename")

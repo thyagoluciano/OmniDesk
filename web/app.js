@@ -1,4 +1,4 @@
-// Crossover Webview Dashboard Application
+// OmniDesk Webview Dashboard Application
 
 let localNode = null;
 let currentPendingPIN = null;
@@ -215,7 +215,7 @@ function renderDevices(trusted, discovered) {
   if (unpairedDiscovered.length === 0) {
     discoveredList.innerHTML = `
       <div class="empty-placeholder">
-        <p>Nenhum outro nó Crossover detectado na LAN no momento.</p>
+        <p>Nenhum outro nó OmniDesk detectado na LAN no momento.</p>
         <p class="hint">Certifique-se de que as máquinas estão na mesma rede Wi-Fi/cabo.</p>
       </div>
     `;

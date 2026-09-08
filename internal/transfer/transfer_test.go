@@ -25,8 +25,8 @@ func TestFileTransferStream(t *testing.T) {
 	var receivedDeviceID string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedDeviceID = r.Header.Get("X-Crossover-Device-ID")
-		receivedToken = r.Header.Get("X-Crossover-Token")
+		receivedDeviceID = r.Header.Get("X-OmniDesk-Device-ID")
+		receivedToken = r.Header.Get("X-OmniDesk-Token")
 
 		data, err := io.ReadAll(r.Body)
 		if err != nil {

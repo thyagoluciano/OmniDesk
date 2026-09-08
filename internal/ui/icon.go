@@ -7,7 +7,7 @@ import (
 	"image/png"
 )
 
-// GenerateIconBytes creates a clean 64x64 PNG icon representing Crossover.
+// GenerateIconBytes creates a clean 64x64 PNG icon representing OmniDesk.
 func GenerateIconBytes() []byte {
 	const size = 64
 	img := image.NewRGBA(image.Rect(0, 0, size, size))

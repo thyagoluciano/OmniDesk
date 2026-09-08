@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"time"
 
-	"crossover/internal/core"
+	"omnidesk/internal/core"
 	"fyne.io/systray"
 )
 
@@ -31,12 +31,10 @@ func (t *TrayApp) Start() {
 func (t *TrayApp) onReady() {
 	iconBytes := GenerateIconBytes()
 	systray.SetIcon(iconBytes)
-	systray.SetTemplateIcon(iconBytes, iconBytes)
-	systray.SetTitle("Crossover")
-	systray.SetTooltip(fmt.Sprintf("Crossover: %s", t.node.Cfg.DeviceName))
+	systray.SetTooltip(fmt.Sprintf("OmniDesk: %s", t.node.Cfg.DeviceName))
 
 	// Dashboard launcher item
-	mDashboard := systray.AddMenuItem("Abrir Painel (Dashboard)", "Abrir a interface gráfica do Crossover")
+	mDashboard := systray.AddMenuItem("Abrir Painel (Dashboard)", "Abrir a interface gráfica do OmniDesk")
 	systray.AddSeparator()
 
 	// Status item
@@ -56,10 +54,10 @@ func (t *TrayApp) onReady() {
 	mClipToggle := systray.AddMenuItem(clipTitle, "Ativar/desativar cópia e cola entre máquinas")
 
 	// Open downloads folder
-	mOpenDownloads := systray.AddMenuItem("Abrir pasta de recebidos", "Abrir ~/Downloads/Crossover")
+	mOpenDownloads := systray.AddMenuItem("Abrir pasta de recebidos", "Abrir ~/Downloads/OmniDesk")
 
 	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Sair do Crossover", "Encerrar o serviço")
+	mQuit := systray.AddMenuItem("Sair do OmniDesk", "Encerrar o serviço")
 
 	// Goroutine to periodically update peer counter
 	go func() {
@@ -99,7 +97,7 @@ func (t *TrayApp) onReady() {
 }
 
 func (t *TrayApp) onExit() {
-	log.Println("[ui] exiting Crossover tray application")
+	log.Println("[ui] exiting OmniDesk tray application")
 	t.node.Stop()
 }
 

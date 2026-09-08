@@ -7,10 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"crossover/assets"
+	"omnidesk/assets"
 )
 
-// InstallLinux installs the crossover binary, icons, desktop launcher, and user systemd service.
+// InstallLinux installs the omnidesk binary, icons, desktop launcher, and user systemd service.
 func InstallLinux(autostart bool) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -36,7 +36,7 @@ func InstallLinux(autostart bool) error {
 		return fmt.Errorf("failed to locate current executable: %w", err)
 	}
 
-	targetBin := filepath.Join(binDir, "crossover")
+	targetBin := filepath.Join(binDir, "omnidesk")
 	if execPath != targetBin {
 		fmt.Printf("-> Instalando binário em %s...\n", targetBin)
 		if err := copyExecutable(execPath, targetBin); err != nil {
@@ -45,15 +45,15 @@ func InstallLinux(autostart bool) error {
 	}
 
 	// 2. Install desktop launcher
-	targetDesktop := filepath.Join(appDir, "crossover.desktop")
+	targetDesktop := filepath.Join(appDir, "omnidesk.desktop")
 	fmt.Printf("-> Registrando lançador de aplicativo em %s...\n", targetDesktop)
 	if err := os.WriteFile(targetDesktop, assets.DesktopEntry, 0644); err != nil {
 		return fmt.Errorf("failed to write .desktop file: %w", err)
 	}
 
 	// 3. Install icons
-	targetPNG := filepath.Join(iconDir, "crossover.png")
-	targetSVG := filepath.Join(svgDir, "crossover.svg")
+	targetPNG := filepath.Join(iconDir, "omnidesk.png")
+	targetSVG := filepath.Join(svgDir, "omnidesk.svg")
 	fmt.Printf("-> Instalando ícones do sistema...\n")
 	_ = os.WriteFile(targetPNG, assets.IconPNG, 0644)
 	_ = os.WriteFile(targetSVG, assets.IconSVG, 0644)
@@ -63,7 +63,7 @@ func InstallLinux(autostart bool) error {
 	_ = exec.Command("gtk-update-icon-cache", "-f", "-t", filepath.Join(home, ".local", "share", "icons", "hicolor")).Run()
 
 	// 4. Install systemd user service
-	targetService := filepath.Join(serviceDir, "crossover.service")
+	targetService := filepath.Join(serviceDir, "omnidesk.service")
 	fmt.Printf("-> Configurando serviço systemd de usuário em %s...\n", targetService)
 	if err := os.WriteFile(targetService, assets.SystemdService, 0644); err != nil {
 		return fmt.Errorf("failed to write systemd service unit: %w", err)
@@ -72,25 +72,25 @@ func InstallLinux(autostart bool) error {
 	if autostart {
 		fmt.Println("-> Ativando e iniciando serviço com 'systemctl --user'...")
 		_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
-		if err := exec.Command("systemctl", "--user", "enable", "--now", "crossover.service").Run(); err != nil {
-			fmt.Printf("Aviso: Falha ao ativar systemd: %v. Você pode rodar manualmente: systemctl --user enable --now crossover.service\n", err)
+		if err := exec.Command("systemctl", "--user", "enable", "--now", "omnidesk.service").Run(); err != nil {
+			fmt.Printf("Aviso: Falha ao ativar systemd: %v. Você pode rodar manualmente: systemctl --user enable --now omnidesk.service\n", err)
 		} else {
-			fmt.Println("✓ Serviço Crossover ativado e iniciado em segundo plano!")
+			fmt.Println("✓ Serviço OmniDesk ativado e iniciado em segundo plano!")
 		}
 	}
 
 	fmt.Println("\n=======================================================")
 	fmt.Println("✓ INSTALAÇÃO CONCLUÍDA COM SUCESSO!")
 	fmt.Println("=======================================================")
-	fmt.Println("O Crossover agora:")
+	fmt.Println("O OmniDesk agora:")
 	fmt.Println("  1. Inicia automaticamente junto com o seu login")
 	fmt.Println("  2. Está disponível no menu de aplicativos do GNOME/Ubuntu")
-	fmt.Println("  3. Pode ser acessado no terminal via comando 'crossover'")
+	fmt.Println("  3. Pode ser acessado no terminal via comando 'omnidesk'")
 	fmt.Println("=======================================================")
 	return nil
 }
 
-// UninstallLinux removes all installed crossover files and stops the systemd user service.
+// UninstallLinux removes all installed omnidesk files and stops the systemd user service.
 func UninstallLinux() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -98,15 +98,15 @@ func UninstallLinux() error {
 	}
 
 	fmt.Println("-> Encerrando e desativando serviço systemd...")
-	_ = exec.Command("systemctl", "--user", "stop", "crossover.service").Run()
-	_ = exec.Command("systemctl", "--user", "disable", "crossover.service").Run()
+	_ = exec.Command("systemctl", "--user", "stop", "omnidesk.service").Run()
+	_ = exec.Command("systemctl", "--user", "disable", "omnidesk.service").Run()
 
 	filesToRemove := []string{
-		filepath.Join(home, ".config", "systemd", "user", "crossover.service"),
-		filepath.Join(home, ".local", "share", "applications", "crossover.desktop"),
-		filepath.Join(home, ".local", "share", "icons", "hicolor", "256x256", "apps", "crossover.png"),
-		filepath.Join(home, ".local", "share", "icons", "hicolor", "scalable", "apps", "crossover.svg"),
-		filepath.Join(home, ".local", "bin", "crossover"),
+		filepath.Join(home, ".config", "systemd", "user", "omnidesk.service"),
+		filepath.Join(home, ".local", "share", "applications", "omnidesk.desktop"),
+		filepath.Join(home, ".local", "share", "icons", "hicolor", "256x256", "apps", "omnidesk.png"),
+		filepath.Join(home, ".local", "share", "icons", "hicolor", "scalable", "apps", "omnidesk.svg"),
+		filepath.Join(home, ".local", "bin", "omnidesk"),
 	}
 
 	for _, f := range filesToRemove {
@@ -116,7 +116,7 @@ func UninstallLinux() error {
 	}
 
 	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
-	fmt.Println("\n✓ Crossover foi completamente desinstalado.")
+	fmt.Println("\n✓ OmniDesk foi completamente desinstalado.")
 	return nil
 }
 

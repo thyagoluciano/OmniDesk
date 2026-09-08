@@ -1,16 +1,16 @@
 [Desktop Entry]
-Name=Crossover
+Name=OmniDesk
 GenericName=File & Clipboard Sync
 Comment=Sincronização P2P de Clipboard e Arquivos em Rede Local para Linux e macOS
-Exec=crossover
-Icon=crossover
+Exec=omnidesk
+Icon=omnidesk
 Terminal=false
 Type=Application
 Categories=Network;Utility;FileTransfer;
 StartupNotify=false
-Keywords=clipboard;sync;transfer;p2p;lan;crossover;
+Keywords=clipboard;sync;transfer;p2p;lan;omnidesk;
 Actions=Dashboard;
 
 [Desktop Action Dashboard]
 Name=Abrir Painel
-Exec=crossover gui
+Exec=omnidesk gui

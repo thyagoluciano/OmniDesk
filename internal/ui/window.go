@@ -9,7 +9,7 @@ import (
 	"runtime"
 )
 
-// OpenDashboard opens the Crossover dashboard in a dedicated desktop application window
+// OpenDashboard opens the OmniDesk dashboard in a dedicated desktop application window
 // (using standalone app mode) or falls back to the system's default browser.
 func OpenDashboard(port int) {
 	url := fmt.Sprintf("http://127.0.0.1:%d/ui/", port)
@@ -21,7 +21,7 @@ func OpenDashboard(port int) {
 		if cacheDir == "" {
 			cacheDir = "/tmp"
 		}
-		profileDir := filepath.Join(cacheDir, "crossover-ui")
+		profileDir := filepath.Join(cacheDir, "omnidesk-ui")
 		_ = os.MkdirAll(profileDir, 0755)
 
 		// 1. Try launching in standalone desktop app window (Chrome / Chromium / Edge / Brave)
@@ -42,7 +42,7 @@ func OpenDashboard(port int) {
 					fmt.Sprintf("--user-data-dir=%s", profileDir),
 					"--no-first-run",
 					"--no-default-browser-check",
-					"--class=crossover",
+					"--class=omnidesk",
 				)
 				if err := cmd.Start(); err == nil {
 					log.Printf("[ui] Opened dashboard in standalone window via %s", browser)

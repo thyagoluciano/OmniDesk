@@ -17,7 +17,7 @@ func NewNotifier() *Notifier {
 
 // NotifyFileReceived sends a native desktop notification about a received file.
 func (n *Notifier) NotifyFileReceived(fileName, senderName string, sizeBytes int64) {
-	title := "Crossover"
+	title := "OmniDesk"
 	sizeStr := formatFileSize(sizeBytes)
 	msg := fmt.Sprintf("Recebido: %s (%s) de %s", fileName, sizeStr, senderName)
 
@@ -39,7 +39,7 @@ func (n *Notifier) SendNotification(title, message string) error {
 	case "linux":
 		// Try notify-send first
 		if path, err := exec.LookPath("notify-send"); err == nil {
-			cmd := exec.Command(path, "-a", "Crossover", title, message)
+			cmd := exec.Command(path, "-a", "OmniDesk", title, message)
 			return cmd.Run()
 		}
 		return fmt.Errorf("no desktop notification tool found (notify-send)")

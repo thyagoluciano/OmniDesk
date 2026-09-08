@@ -2,14 +2,14 @@ package assets
 
 import _ "embed"
 
-//go:embed crossover.desktop
+//go:embed omnidesk.desktop
 var DesktopEntry []byte
 
-//go:embed crossover.service
+//go:embed omnidesk.service
 var SystemdService []byte
 
-//go:embed crossover.png
+//go:embed omnidesk.png
 var IconPNG []byte
 
-//go:embed crossover.svg
+//go:embed omnidesk.svg
 var IconSVG []byte

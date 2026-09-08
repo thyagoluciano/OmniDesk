@@ -91,8 +91,8 @@ func (c *Client) SendStream(ctx context.Context, body io.Reader, size int64, fil
 		req.ContentLength = size
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
-	req.Header.Set("X-Crossover-Device-ID", c.myDeviceID)
-	req.Header.Set("X-Crossover-Token", token)
+	req.Header.Set("X-OmniDesk-Device-ID", c.myDeviceID)
+	req.Header.Set("X-OmniDesk-Token", token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

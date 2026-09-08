@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"crossover/internal/config"
-	"crossover/internal/discovery"
+	"omnidesk/internal/config"
+	"omnidesk/internal/discovery"
 )
 
 type mockPeerProvider struct {

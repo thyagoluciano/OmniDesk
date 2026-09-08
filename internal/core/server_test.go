@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"crossover/internal/config"
-	"crossover/internal/pairing"
+	"omnidesk/internal/config"
+	"omnidesk/internal/pairing"
 )
 
 type mockClipHandler struct {
@@ -106,8 +106,8 @@ func TestServerPairingAndAuth(t *testing.T) {
 	}
 	body, _ = json.Marshal(clipPayload)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/clipboard", bytes.NewReader(body))
-	req.Header.Set("X-Crossover-Device-ID", "node-a")
-	req.Header.Set("X-Crossover-Token", confResp.AuthToken)
+	req.Header.Set("X-OmniDesk-Device-ID", "node-a")
+	req.Header.Set("X-OmniDesk-Token", confResp.AuthToken)
 	w = httptest.NewRecorder()
 	srv.authMiddleware(srv.handleClipboard)(w, req)
 	if w.Code != http.StatusOK {
@@ -119,8 +119,8 @@ func TestServerPairingAndAuth(t *testing.T) {
 
 	// Test protected endpoint with invalid token
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/clipboard", bytes.NewReader(body))
-	req.Header.Set("X-Crossover-Device-ID", "node-a")
-	req.Header.Set("X-Crossover-Token", "fake-token")
+	req.Header.Set("X-OmniDesk-Device-ID", "node-a")
+	req.Header.Set("X-OmniDesk-Token", "fake-token")
 	w = httptest.NewRecorder()
 	srv.authMiddleware(srv.handleClipboard)(w, req)
 	if w.Code != http.StatusForbidden {

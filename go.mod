@@ -1,4 +1,4 @@
-module crossover
+module omnidesk
 
 go 1.25.0
 

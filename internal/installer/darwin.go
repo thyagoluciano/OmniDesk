@@ -13,10 +13,10 @@ const launchAgentPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.crossover.app</string>
+    <string>com.omnidesk.app</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/Crossover.app/Contents/MacOS/crossover</string>
+        <string>/Applications/OmniDesk.app/Contents/MacOS/omnidesk</string>
         <string>daemon</string>
     </array>
     <key>RunAtLoad</key>
@@ -36,18 +36,18 @@ func InstallDarwin(autostart bool) error {
 		return fmt.Errorf("failed to get user home directory: %w", err)
 	}
 
-	// 1. Check if Crossover.app is already in /Applications or in current dir
-	appDst := "/Applications/Crossover.app"
+	// 1. Check if OmniDesk.app is already in /Applications or in current dir
+	appDst := "/Applications/OmniDesk.app"
 	if _, err := os.Stat(appDst); err != nil {
 		execPath, _ := os.Executable()
-		if strings.Contains(execPath, "Crossover.app") {
-			idx := strings.Index(execPath, "Crossover.app")
-			bundleSrc := execPath[:idx+len("Crossover.app")]
+		if strings.Contains(execPath, "OmniDesk.app") {
+			idx := strings.Index(execPath, "OmniDesk.app")
+			bundleSrc := execPath[:idx+len("OmniDesk.app")]
 			fmt.Printf("-> Copiando bundle para %s...\n", appDst)
 			_ = exec.Command("cp", "-R", bundleSrc, appDst).Run()
-		} else if _, err := os.Stat("Crossover.app"); err == nil {
-			fmt.Printf("-> Copiando Crossover.app para %s...\n", appDst)
-			_ = exec.Command("cp", "-R", "Crossover.app", appDst).Run()
+		} else if _, err := os.Stat("OmniDesk.app"); err == nil {
+			fmt.Printf("-> Copiando OmniDesk.app para %s...\n", appDst)
+			_ = exec.Command("cp", "-R", "OmniDesk.app", appDst).Run()
 		}
 	}
 
@@ -57,7 +57,7 @@ func InstallDarwin(autostart bool) error {
 		_ = exec.Command("xattr", "-cr", appDst).Run()
 		fmt.Println("-> Aplicando assinatura ad-hoc local (codesign)...")
 		_ = exec.Command("codesign", "--force", "--deep", "-s", "-", appDst).Run()
-		_ = exec.Command("chmod", "+x", filepath.Join(appDst, "Contents", "MacOS", "crossover")).Run()
+		_ = exec.Command("chmod", "+x", filepath.Join(appDst, "Contents", "MacOS", "omnidesk")).Run()
 	}
 
 	agentDir := filepath.Join(home, "Library", "LaunchAgents")
@@ -65,7 +65,7 @@ func InstallDarwin(autostart bool) error {
 		return fmt.Errorf("failed to create LaunchAgents directory: %w", err)
 	}
 
-	plistPath := filepath.Join(agentDir, "com.crossover.app.plist")
+	plistPath := filepath.Join(agentDir, "com.omnidesk.app.plist")
 	fmt.Printf("-> Criando LaunchAgent em %s...\n", plistPath)
 	if err := os.WriteFile(plistPath, []byte(launchAgentPlist), 0644); err != nil {
 		return fmt.Errorf("failed to write LaunchAgent plist: %w", err)
@@ -77,7 +77,7 @@ func InstallDarwin(autostart bool) error {
 		if err := exec.Command("launchctl", "load", "-w", plistPath).Run(); err != nil {
 			fmt.Printf("Aviso: Falha ao carregar no launchctl: %v\n", err)
 		} else {
-			fmt.Println("✓ Crossover configurado para inicialização automática no macOS!")
+			fmt.Println("✓ OmniDesk configurado para inicialização automática no macOS!")
 		}
 	}
 
@@ -91,9 +91,9 @@ func UninstallDarwin() error {
 		return fmt.Errorf("failed to get user home directory: %w", err)
 	}
 
-	plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.crossover.app.plist")
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.omnidesk.app.plist")
 	_ = exec.Command("launchctl", "unload", plistPath).Run()
 	_ = os.Remove(plistPath)
-	fmt.Println("✓ Autostart do Crossover no macOS removido com sucesso.")
+	fmt.Println("✓ Autostart do OmniDesk no macOS removido com sucesso.")
 	return nil
 }

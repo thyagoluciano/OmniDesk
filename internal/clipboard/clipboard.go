@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"crossover/internal/config"
-	"crossover/internal/discovery"
+	"omnidesk/internal/config"
+	"omnidesk/internal/discovery"
 	"golang.design/x/clipboard"
 )
 
@@ -174,8 +174,8 @@ func (e *Engine) broadcastText(text string) {
 				return
 			}
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Crossover-Device-ID", e.cfg.DeviceID)
-			req.Header.Set("X-Crossover-Token", p.Token)
+			req.Header.Set("X-OmniDesk-Device-ID", e.cfg.DeviceID)
+			req.Header.Set("X-OmniDesk-Token", p.Token)
 
 			resp, err := e.httpClient.Do(req)
 			if err != nil {
