@@ -79,6 +79,7 @@ func (s *Server) Start(port int) error {
 	mux.HandleFunc("/api/v1/devices", s.handleDevices)
 	mux.HandleFunc("/api/v1/devices/send", s.handleDevicesSend)
 	mux.HandleFunc("/api/v1/devices/pair", s.handleDevicesPair)
+	mux.HandleFunc("/api/v1/devices/remove", s.handleDevicesRemove)
 	mux.HandleFunc("/api/v1/clipboard/toggle", s.handleClipboardToggle)
 
 	// Protected endpoints (require trusted device token)
@@ -457,6 +458,36 @@ func (s *Server) handleDevicesPair(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"pin":    sess.PIN,
 		"target": targetAddr,
+	})
+}
+
+func (s *Server) handleDevicesRemove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		DeviceID string `json:"device_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DeviceID == "" {
+		http.Error(w, "device_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if _, ok := s.cfg.GetTrustedDevice(body.DeviceID); !ok {
+		http.Error(w, "device not found in trusted list", http.StatusNotFound)
+		return
+	}
+
+	if err := s.cfg.RemoveTrustedDevice(body.DeviceID); err != nil {
+		http.Error(w, fmt.Sprintf("failed to remove device: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
 	})
 }
 

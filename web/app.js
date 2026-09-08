@@ -262,6 +262,14 @@ function createTrustedCard(dev) {
       <div><strong>Último Contato:</strong> ${dev.last_seen || "Recentemente"}</div>
     </div>
 
+    <button class="btn btn-outline btn-sm btn-remove-device">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+      </svg>
+      Remover dispositivo
+    </button>
+
     <div class="card-dropzone" id="dropzone-${dev.id}">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -302,6 +310,10 @@ function createTrustedCard(dev) {
     selectedTargetForUpload = dev.id;
     const fileInput = document.getElementById("global-file-input");
     fileInput.click();
+  });
+
+  card.querySelector(".btn-remove-device").addEventListener("click", () => {
+    removeDevice(dev.id, dev.name);
   });
 
   return card;
@@ -383,6 +395,29 @@ async function approvePin(pin, modal, errorElem) {
       errorElem.textContent = "Falha ao conectar: " + err.message;
       errorElem.classList.remove("hidden");
     }
+  }
+}
+
+async function removeDevice(deviceId, deviceName) {
+  const confirmed = confirm(`Remover o pareamento com '${deviceName}'? Este dispositivo deixará de ser confiável e precisará ser pareado novamente para voltar a sincronizar.`);
+  if (!confirmed) return;
+
+  try {
+    const resp = await fetch("/api/v1/devices/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: deviceId })
+    });
+
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      alert("Erro ao remover dispositivo: " + (data.error || resp.statusText));
+      return;
+    }
+
+    await refreshDevicesAndStatus();
+  } catch (err) {
+    alert("Falha de rede ao remover dispositivo: " + err.message);
   }
 }
 
