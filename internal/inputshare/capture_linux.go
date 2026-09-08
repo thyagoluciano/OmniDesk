@@ -300,10 +300,22 @@ func x11ButtonDetail(btn MouseButton) byte {
 func (b *x11Backend) Inject(ev Event) error {
 	switch e := ev.(type) {
 	case MouseMoveEvent:
-		return xtest.FakeInputChecked(b.conn, xproto.MotionNotify, 1, xproto.TimeCurrentTime, b.root, e.DX, e.DY, 0).Check()
+		// Unchecked (fire-and-forget): FakeInputChecked(...).Check() forces
+		// a full round trip to the X server (xgb's Cookie.Check calls
+		// conn.Sync() when nothing has piggy-backed a reply yet — see
+		// cookie.go). Inject runs synchronously inside Conn.readLoop, so
+		// that round trip blocks reading the *next* websocket frame too;
+		// at real mouse/trackpad event rates this serializes into visible
+		// stutter on the controlled machine. Motion is exactly the case
+		// where losing an occasional sample silently is fine and a stuck
+		// connection is not — unlike a key or click, which still use the
+		// checked/blocking form below.
+		xtest.FakeInput(b.conn, xproto.MotionNotify, 1, xproto.TimeCurrentTime, b.root, e.DX, e.DY, 0)
+		return nil
 
 	case MouseWarpEvent:
-		return xtest.FakeInputChecked(b.conn, xproto.MotionNotify, 0, xproto.TimeCurrentTime, b.root, int16(e.X), int16(e.Y), 0).Check()
+		xtest.FakeInput(b.conn, xproto.MotionNotify, 0, xproto.TimeCurrentTime, b.root, int16(e.X), int16(e.Y), 0)
+		return nil
 
 	case MouseButtonEvent:
 		t := byte(xproto.ButtonRelease)
