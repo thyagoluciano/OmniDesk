@@ -15,9 +15,11 @@ rm -rf "${APP_DIR}"
 mkdir -p "${MACOS_DIR}"
 mkdir -p "${RESOURCES_DIR}"
 
-echo "==> Compilando binário macOS Darwin (${TARGET_ARCH})..."
-cd "${ROOT_DIR}"
-CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -ldflags="-s -w" -o "${MACOS_DIR}/omnidesk" ./cmd/omnidesk
+if [ "$(uname -s)" = "Darwin" ]; then
+    CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -ldflags="-s -w" -o "${MACOS_DIR}/omnidesk" ./cmd/omnidesk
+else
+    CGO_ENABLED=0 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -ldflags="-s -w" -o "${MACOS_DIR}/omnidesk" ./cmd/omnidesk
+fi
 
 echo "==> Gerando PkgInfo..."
 echo -n "APPL????" > "${CONTENTS_DIR}/PkgInfo"
