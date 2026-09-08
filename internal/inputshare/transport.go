@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -102,8 +103,30 @@ func DialSender(ctx context.Context, targetAddr, localDeviceID, localToken, peer
 		}
 		return nil, fmt.Errorf("inputshare: failed to dial input session with %s%s: %w", targetAddr, status, err)
 	}
+	disableNagle(ws)
 
 	return newConn(ws, peerID, roleSender), nil
+}
+
+// disableNagle turns off Nagle's algorithm on a websocket connection's
+// underlying TCP socket. Left at the OS default, Nagle delays sending a
+// small outbound segment while an earlier one is still unacknowledged,
+// hoping to coalesce them — a reasonable trade for bulk transfer, but a
+// real, well-known source of tens-to-hundreds of milliseconds of added
+// latency for a stream of small, frequent packets like mouse motion,
+// especially against a peer using delayed ACKs (the classic
+// "Nagle + delayed ACK" stall). None of this connection's traffic benefits
+// from that coalescing — every frame here is latency-sensitive by nature
+// (specs/input-sharing-transport's whole reason to coalesce moves at the
+// application layer instead is to keep exactly one fresh sample in flight,
+// not to batch bytes on the wire) — so it's turned off unconditionally.
+// Best-effort: some transports gorilla/websocket can ride (e.g. a proxied
+// or non-TCP connection) don't have this dial, so a failed assertion is a
+// silent no-op rather than an error.
+func disableNagle(ws *websocket.Conn) {
+	if tcp, ok := ws.UnderlyingConn().(*net.TCPConn); ok {
+		_ = tcp.SetNoDelay(true)
+	}
 }
 
 // upgrader is shared by every accepted input-sharing connection. Origin
@@ -125,6 +148,7 @@ func Accept(w http.ResponseWriter, r *http.Request, peerID string) (*Conn, error
 	if err != nil {
 		return nil, fmt.Errorf("inputshare: websocket upgrade failed: %w", err)
 	}
+	disableNagle(ws)
 
 	return newConn(ws, peerID, roleReceiver), nil
 }
