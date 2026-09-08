@@ -200,6 +200,16 @@ func TestTransportCoalescesMoves(t *testing.T) {
 			if moveCount >= n {
 				t.Fatalf("coalescing did not reduce move count: got %d of %d sent", moveCount, n)
 			}
+			var totalDX, totalDY int32
+			for _, ev := range evs {
+				if m, ok := ev.(MouseMoveEvent); ok {
+					totalDX += int32(m.DX)
+					totalDY += int32(m.DY)
+				}
+			}
+			if totalDX != n || totalDY != n {
+				t.Fatalf("accumulated motion did not preserve total distance: got DX=%d DY=%d, want %d", totalDX, totalDY, n)
+			}
 			return
 		}
 		if time.Now().After(deadline) {

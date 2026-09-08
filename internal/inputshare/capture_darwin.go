@@ -344,16 +344,6 @@ func (b *darwinBackend) dispatchFlagsChanged(event uintptr) {
 	}
 }
 
-func clampDelta16(d int32) int16 {
-	const max = 32767
-	if d > max {
-		return max
-	}
-	if d < -max {
-		return -max
-	}
-	return int16(d)
-}
 
 // currentLocation returns the live global cursor position. CGEventCreate(NULL)
 // followed by CGEventGetLocation is the standard Quartz technique for

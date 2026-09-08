@@ -46,9 +46,9 @@ type Conn struct {
 	// (specs/input-sharing-transport: "Entrega ordenada e sem perdas").
 	reliableCh chan Event
 
-	// Coalescing slot for mouse-move events — only the latest pending move
-	// is kept (specs/input-sharing-transport: "Coalescing de eventos de
-	// movimento").
+	// Coalescing slot for mouse-move events: accumulates pending relative
+	// deltas until writeLoop transmits them, ensuring no motion is dropped
+	// under high event rates.
 	moveMu     sync.Mutex
 	pendingMv  *MouseMoveEvent
 	moveSignal chan struct{}
@@ -311,7 +311,7 @@ func (c *Conn) writeLoop() {
 		mv := c.pendingMv
 		c.pendingMv = nil
 		c.moveMu.Unlock()
-		if mv != nil {
+		if mv != nil && (mv.DX != 0 || mv.DY != 0) {
 			if !c.writeEvent(*mv) {
 				return
 			}
@@ -354,7 +354,12 @@ func (c *Conn) enqueue(ev Event) {
 	if ev.Type().IsCoalescable() {
 		mv := ev.(MouseMoveEvent)
 		c.moveMu.Lock()
-		c.pendingMv = &mv
+		if c.pendingMv == nil {
+			c.pendingMv = &mv
+		} else {
+			c.pendingMv.DX = clampDelta16(int32(c.pendingMv.DX) + int32(mv.DX))
+			c.pendingMv.DY = clampDelta16(int32(c.pendingMv.DY) + int32(mv.DY))
+		}
 		c.moveMu.Unlock()
 		select {
 		case c.moveSignal <- struct{}{}:

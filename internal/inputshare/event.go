@@ -181,6 +181,18 @@ func boolByte(b bool) byte {
 	return 0
 }
 
+// clampDelta16 clamps an int32 motion or scroll delta to the int16 range.
+func clampDelta16(d int32) int16 {
+	const max = 32767
+	if d > max {
+		return max
+	}
+	if d < -max {
+		return -max
+	}
+	return int16(d)
+}
+
 // Decode parses a single framed Event from raw WebSocket message bytes.
 func Decode(data []byte) (Event, error) {
 	if len(data) == 0 {

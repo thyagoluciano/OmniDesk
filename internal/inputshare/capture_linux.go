@@ -249,19 +249,8 @@ func (b *x11Backend) dispatchMotion(raw []byte) {
 	b.mu.Unlock()
 
 	if b.cb.OnMotion != nil {
-		b.cb.OnMotion(int(ev.RootX), int(ev.RootY), clampDelta(dx), clampDelta(dy))
+		b.cb.OnMotion(int(ev.RootX), int(ev.RootY), clampDelta16(dx), clampDelta16(dy))
 	}
-}
-
-func clampDelta(d int32) int16 {
-	const max = 32767
-	if d > max {
-		return max
-	}
-	if d < -max {
-		return -max
-	}
-	return int16(d)
 }
 
 func (b *x11Backend) Stop() {
