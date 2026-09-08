@@ -5,6 +5,7 @@ package inputshare
 import (
 	"context"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -101,5 +102,140 @@ func TestX11LiveCaptureAndInject(t *testing.T) {
 	case <-stopped:
 	case <-time.After(3 * time.Second):
 		t.Fatal("Stop did not return within 3s: the record loop is still blocked")
+	}
+}
+
+// TestX11LiveKeyAndButtonRoundTrip covers what TestX11LiveCaptureAndInject
+// deliberately leaves out: keyboard and mouse-button events. It injects a
+// representative sample of keymap_linux.go's evdevToHID table (letters,
+// digits, punctuation, modifiers) plus a mouse click, and asserts every one
+// comes back through the capture stream with the same HID usage and
+// pressed/released state, in order.
+//
+// This only proves the injection→RECORD→dispatch plumbing is sound for
+// these event types (the same thing TestX11LiveCaptureAndInject proved for
+// motion) — it round-trips through keymap_linux.go's own table in both
+// directions, so it cannot catch a HID usage mistakenly paired with the
+// wrong evdev code in that table (inject and capture would agree on the
+// same wrong key). Pair it with a quick manual check: run this on a plain
+// text field with your intended keyboard layout and confirm what actually
+// gets typed matches what the log below claims was injected.
+//
+//	OMNIDESK_X11_LIVE_TEST=1 go test ./internal/inputshare -run TestX11LiveKeyAndButton -v
+func TestX11LiveKeyAndButtonRoundTrip(t *testing.T) {
+	if os.Getenv("OMNIDESK_X11_LIVE_TEST") == "" {
+		t.Skip("set OMNIDESK_X11_LIVE_TEST=1 to run against the local X server (sends real key/button events)")
+	}
+
+	backend, err := newX11Backend()
+	if err != nil {
+		t.Fatalf("newX11Backend: %v", err)
+	}
+	b := backend.(*x11Backend)
+
+	keys := []HIDUsage{
+		HIDKeyA, HIDKeyZ, HIDKeyM,
+		HIDKey1, HIDKey0,
+		HIDKeySpace, HIDKeyEnter, HIDKeyTab, HIDKeyBackspace,
+		HIDKeyComma, HIDKeyPeriod, HIDKeySlash, HIDKeyMinus, HIDKeyEqual,
+		HIDKeyLeftShift, HIDKeyLeftControl, HIDKeyLeftAlt,
+		HIDKeyUp, HIDKeyDown, HIDKeyLeft, HIDKeyRight,
+	}
+
+	type gotEvent struct {
+		key     *KeyEvent
+		btn     *MouseButtonEvent
+		scrollY int16
+	}
+	var (
+		mu  sync.Mutex
+		got []gotEvent
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := b.Start(ctx, Callbacks{
+		OnKey: func(hid HIDUsage, pressed bool) {
+			mu.Lock()
+			got = append(got, gotEvent{key: &KeyEvent{HID: hid, Pressed: pressed}})
+			mu.Unlock()
+		},
+		OnButton: func(btn MouseButton, pressed bool) {
+			mu.Lock()
+			got = append(got, gotEvent{btn: &MouseButtonEvent{Button: btn, Pressed: pressed}})
+			mu.Unlock()
+		},
+		OnScroll: func(dx, dy int16) {
+			mu.Lock()
+			got = append(got, gotEvent{scrollY: dy})
+			mu.Unlock()
+		},
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(b.Stop)
+
+	time.Sleep(300 * time.Millisecond)
+
+	inject := func(ev Event) {
+		done := make(chan error, 1)
+		go func() { done <- b.Inject(ev) }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Inject(%#v): %v", ev, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Inject(%#v) blocked for 2s", ev)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	var want []gotEvent
+	for _, k := range keys {
+		inject(KeyEvent{HID: k, Pressed: true})
+		inject(KeyEvent{HID: k, Pressed: false})
+		want = append(want,
+			gotEvent{key: &KeyEvent{HID: k, Pressed: true}},
+			gotEvent{key: &KeyEvent{HID: k, Pressed: false}},
+		)
+	}
+	inject(MouseButtonEvent{Button: MouseButtonLeft, Pressed: true})
+	inject(MouseButtonEvent{Button: MouseButtonLeft, Pressed: false})
+	want = append(want,
+		gotEvent{btn: &MouseButtonEvent{Button: MouseButtonLeft, Pressed: true}},
+		gotEvent{btn: &MouseButtonEvent{Button: MouseButtonLeft, Pressed: false}},
+	)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(got)
+		mu.Unlock()
+		if n >= len(want) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	t.Logf("injected %d key/button events, captured %d", len(want), len(got))
+	if len(got) < len(want) {
+		t.Fatalf("captured only %d of %d key/button events — check for \"sem mapeamento HID conhecido\" warnings above", len(got), len(want))
+	}
+	for i, w := range want {
+		g := got[i]
+		switch {
+		case w.key != nil:
+			if g.key == nil || *g.key != *w.key {
+				t.Fatalf("event %d: want key %+v, got %+v", i, *w.key, g)
+			}
+		case w.btn != nil:
+			if g.btn == nil || *g.btn != *w.btn {
+				t.Fatalf("event %d: want button %+v, got %+v", i, *w.btn, g)
+			}
+		}
 	}
 }
