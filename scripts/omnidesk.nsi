@@ -1,23 +1,23 @@
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
-Name "Crossover"
-OutFile "../dist/Crossover-Setup-0.1.0-x64.exe"
-InstallDir "$LOCALAPPDATA\Programs\Crossover"
-InstallDirRegKey HKCU "Software\Crossover" "InstallDir"
+Name "OmniDesk"
+OutFile "../dist/OmniDesk-Setup-0.1.0-x64.exe"
+InstallDir "$LOCALAPPDATA\Programs\OmniDesk"
+InstallDirRegKey HKCU "Software\OmniDesk" "InstallDir"
 RequestExecutionLevel user
 
 ; Interface Settings
 !define MUI_ABORTWARNING
-!define MUI_ICON "../assets/crossover.ico"
-!define MUI_UNICON "../assets/crossover.ico"
+!define MUI_ICON "../assets/omnidesk.ico"
+!define MUI_UNICON "../assets/omnidesk.ico"
 
 ; Setup Pages
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "$INSTDIR\crossover.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "Iniciar o Crossover agora"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\omnidesk.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Iniciar o OmniDesk agora"
 !insertmacro MUI_PAGE_FINISH
 
 ; Uninstaller Pages
@@ -32,47 +32,47 @@ Section "MainSection" SEC01
   SetOutPath "$INSTDIR"
   SetOverwrite on
   
-  File "../dist/crossover.exe"
-  File "../assets/crossover.ico"
+  File "../dist/omnidesk.exe"
+  File "../assets/omnidesk.ico"
   
   ; Write uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
   
   ; Create Shortcuts in Start Menu and Desktop
-  CreateDirectory "$SMPROGRAMS\Crossover"
-  CreateShortcut "$SMPROGRAMS\Crossover\Crossover.lnk" "$INSTDIR\crossover.exe" "" "$INSTDIR\crossover.ico"
-  CreateShortcut "$SMPROGRAMS\Crossover\Desinstalar.lnk" "$INSTDIR\uninstall.exe"
-  CreateShortcut "$DESKTOP\Crossover.lnk" "$INSTDIR\crossover.exe" "" "$INSTDIR\crossover.ico"
+  CreateDirectory "$SMPROGRAMS\OmniDesk"
+  CreateShortcut "$SMPROGRAMS\OmniDesk\OmniDesk.lnk" "$INSTDIR\omnidesk.exe" "" "$INSTDIR\omnidesk.ico"
+  CreateShortcut "$SMPROGRAMS\OmniDesk\Desinstalar.lnk" "$INSTDIR\uninstall.exe"
+  CreateShortcut "$DESKTOP\OmniDesk.lnk" "$INSTDIR\omnidesk.exe" "" "$INSTDIR\omnidesk.ico"
   
   ; Autostart via Registry Run Key
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Crossover" '"$INSTDIR\crossover.exe" daemon'
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "OmniDesk" '"$INSTDIR\omnidesk.exe" daemon'
   
   ; Register in Windows "Add/Remove Programs"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Crossover" "DisplayName" "Crossover"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Crossover" "UninstallString" '"$INSTDIR\uninstall.exe"'
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Crossover" "DisplayIcon" "$INSTDIR\crossover.ico"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Crossover" "DisplayVersion" "0.1.0"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Crossover" "Publisher" "Crossover"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "DisplayName" "OmniDesk"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "UninstallString" '"$INSTDIR\uninstall.exe"'
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "DisplayIcon" "$INSTDIR\omnidesk.ico"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "DisplayVersion" "0.1.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "Publisher" "OmniDesk"
 SectionEnd
 
 Section "Uninstall"
   ; Terminate running instance if active
-  nsExec::Exec 'taskkill /F /IM crossover.exe'
+  nsExec::Exec 'taskkill /F /IM omnidesk.exe'
   
   ; Remove Registry entries
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Crossover"
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Crossover"
-  DeleteRegKey HKCU "Software\Crossover"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "OmniDesk"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk"
+  DeleteRegKey HKCU "Software\OmniDesk"
   
   ; Remove Shortcuts
-  Delete "$DESKTOP\Crossover.lnk"
-  Delete "$SMPROGRAMS\Crossover\Crossover.lnk"
-  Delete "$SMPROGRAMS\Crossover\Desinstalar.lnk"
-  RMDir "$SMPROGRAMS\Crossover"
+  Delete "$DESKTOP\OmniDesk.lnk"
+  Delete "$SMPROGRAMS\OmniDesk\OmniDesk.lnk"
+  Delete "$SMPROGRAMS\OmniDesk\Desinstalar.lnk"
+  RMDir "$SMPROGRAMS\OmniDesk"
   
   ; Remove Files
-  Delete "$INSTDIR\crossover.exe"
-  Delete "$INSTDIR\crossover.ico"
+  Delete "$INSTDIR\omnidesk.exe"
+  Delete "$INSTDIR\omnidesk.ico"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
 SectionEnd

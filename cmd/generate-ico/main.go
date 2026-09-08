@@ -7,12 +7,12 @@ import (
 )
 
 func main() {
-	pngData, err := os.ReadFile("assets/crossover.png")
+	pngData, err := os.ReadFile("assets/omnidesk.png")
 	if err != nil {
 		log.Fatalf("Failed to read PNG: %v", err)
 	}
 
-	icoFile, err := os.Create("assets/crossover.ico")
+	icoFile, err := os.Create("assets/omnidesk.ico")
 	if err != nil {
 		log.Fatalf("Failed to create ICO: %v", err)
 	}
@@ -39,5 +39,5 @@ func main() {
 		log.Fatalf("Failed to write PNG payload to ICO: %v", err)
 	}
 
-	log.Printf("assets/crossover.ico generated successfully (%d bytes).", len(pngData)+22)
+	log.Printf("assets/omnidesk.ico generated successfully (%d bytes).", len(pngData)+22)
 }
