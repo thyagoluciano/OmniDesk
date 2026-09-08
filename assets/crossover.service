@@ -1,0 +1,15 @@
+[Unit]
+Description=Crossover - Sincronização P2P de Clipboard e Arquivos
+Documentation=https://github.com/thyagoluciano/crossover
+PartOf=graphical-session.target
+After=graphical-session.target network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/crossover daemon
+Restart=on-failure
+RestartSec=3s
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
+
+[Install]
+WantedBy=default.target

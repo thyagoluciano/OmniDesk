@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="crossover-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0284c7" flood-opacity="0.35" />
+    </filter>
+  </defs>
+  <!-- Background rounded rectangle -->
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#crossover-grad)" filter="url(#shadow)" />
+  
+  <!-- Intersecting arrows symbol -->
+  <g fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Top-left to bottom-right flow -->
+    <path d="M72 184 L184 72" />
+    <path d="M140 72 L184 72 L184 116" />
+    
+    <!-- Bottom-left to top-right flow -->
+    <path d="M72 72 L184 184" />
+    <path d="M140 184 L184 184 L184 140" />
+  </g>
+</svg>
