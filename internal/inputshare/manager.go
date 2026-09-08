@@ -76,6 +76,13 @@ type Manager struct {
 	// on both the sending (border-crossing) and receiving (accepting) paths
 	// so a pause is symmetric regardless of which side initiates.
 	pausedPeers map[string]bool
+
+	// unavailableReason explains why the platform capture/inject backend
+	// could not start (e.g. a missing macOS Accessibility/Input Monitoring
+	// grant), so the dashboard/tray can show an actionable message instead
+	// of input-sharing silently doing nothing (specs
+	// input-capture-inject-macos: "Onboarding de permissões").
+	unavailableReason string
 }
 
 // NewManager constructs a Manager. Start must be called before it does
@@ -180,6 +187,7 @@ func (m *Manager) ActiveSession() (peerID string, sending bool, ok bool) {
 func (m *Manager) Start(ctx context.Context) error {
 	backend, err := NewBackend()
 	if err != nil {
+		m.setUnavailable(err)
 		log.Printf("[inputshare] desabilitado: %v", err)
 		return nil
 	}
@@ -187,6 +195,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	rect, err := backend.ScreenRect()
 	if err != nil {
+		m.setUnavailable(err)
 		log.Printf("[inputshare] desabilitado: falha ao ler geometria da tela: %v", err)
 		return nil
 	}
@@ -200,11 +209,29 @@ func (m *Manager) Start(ctx context.Context) error {
 		OnKey:    m.handleLocalKey,
 	}
 	if err := backend.Start(ctx, cb); err != nil {
-		return fmt.Errorf("inputshare: failed to start %s capture: %w", backend.Name(), err)
+		wrapped := fmt.Errorf("inputshare: failed to start %s capture: %w", backend.Name(), err)
+		m.setUnavailable(wrapped)
+		return wrapped
 	}
 
 	log.Printf("[inputshare] ativo (%s), tela local %dx%d", backend.Name(), rect.WidthPx, rect.HeightPx)
 	return nil
+}
+
+func (m *Manager) setUnavailable(err error) {
+	m.mu.Lock()
+	m.unavailableReason = err.Error()
+	m.mu.Unlock()
+}
+
+// UnavailableReason reports why input-sharing failed to start on this node,
+// if it did, so the dashboard/tray can surface it instead of only the log
+// (specs input-capture-inject-macos: "Onboarding de permissões... em vez de
+// falhar silenciosamente").
+func (m *Manager) UnavailableReason() (reason string, unavailable bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.unavailableReason, m.unavailableReason != ""
 }
 
 // Stop ends any active session and releases the capture backend.

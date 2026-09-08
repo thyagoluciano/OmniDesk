@@ -547,9 +547,20 @@ async function refreshKvm() {
 
 function renderKvmStatus(status) {
   const badge = document.getElementById("kvm-status-badge");
+  if (status.unavailable) {
+    badge.textContent = status.unavailable_reason || "Indisponível nesta plataforma";
+    badge.className = "badge";
+    badge.style.color = "var(--danger)";
+    badge.style.borderColor = "var(--danger)";
+    badge.title = status.unavailable_reason || "";
+    return;
+  }
+  badge.title = "";
   if (!status.active) {
     badge.textContent = "Inativo";
     badge.className = "badge badge-secondary";
+    badge.style.color = "";
+    badge.style.borderColor = "";
     return;
   }
   const dev = trustedDevicesCache.find(d => d.id === status.peer_id);

@@ -1,6 +1,9 @@
 package inputshare
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestAllHeld(t *testing.T) {
 	combo := []HIDUsage{HIDKeyLeftControl, HIDKeyLeftAlt, HIDKeyHome}
@@ -81,5 +84,27 @@ func TestPausePeerBlocksAndClearsActiveSession(t *testing.T) {
 	m.ResumePeer("peer-1")
 	if m.isPaused("peer-1") {
 		t.Error("expected peer-1 to no longer be paused after ResumePeer")
+	}
+}
+
+// TestUnavailableReason covers the dashboard-exposure plumbing task 6.3
+// added: a failure to start the platform backend (e.g. a missing macOS
+// permission) must be readable back out via UnavailableReason, not just
+// logged, so the server/UI layer (handleInputStatus) can show it.
+func TestUnavailableReason(t *testing.T) {
+	m := &Manager{}
+
+	if reason, unavailable := m.UnavailableReason(); unavailable || reason != "" {
+		t.Fatalf("expected no unavailable reason initially, got reason=%q unavailable=%v", reason, unavailable)
+	}
+
+	m.setUnavailable(errors.New("permissão de Acessibilidade não concedida"))
+
+	reason, unavailable := m.UnavailableReason()
+	if !unavailable {
+		t.Fatal("expected unavailable=true after setUnavailable")
+	}
+	if reason != "permissão de Acessibilidade não concedida" {
+		t.Errorf("unexpected reason: %q", reason)
 	}
 }

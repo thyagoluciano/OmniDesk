@@ -562,12 +562,15 @@ func (s *Server) handleInputStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	peerID, sending, active := s.node.InputMgr.ActiveSession()
+	reason, unavailable := s.node.InputMgr.UnavailableReason()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"active":  active,
-		"peer_id": peerID,
-		"sending": sending, // true = this node is controlling peer_id; false = peer_id is controlling this node
+		"active":             active,
+		"peer_id":            peerID,
+		"sending":            sending, // true = this node is controlling peer_id; false = peer_id is controlling this node
+		"unavailable":        unavailable,
+		"unavailable_reason": reason,
 	})
 }
 
