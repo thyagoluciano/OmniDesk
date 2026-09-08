@@ -75,12 +75,13 @@ func (s *Server) Start(port int) error {
 	mux.HandleFunc("/api/v1/pair/approve-pin", s.handleApprovePIN)
 	mux.HandleFunc("/api/v1/pair/pending", s.handlePendingSessions)
 
-	// Web UI management endpoints
-	mux.HandleFunc("/api/v1/devices", s.handleDevices)
-	mux.HandleFunc("/api/v1/devices/send", s.handleDevicesSend)
-	mux.HandleFunc("/api/v1/devices/pair", s.handleDevicesPair)
-	mux.HandleFunc("/api/v1/devices/remove", s.handleDevicesRemove)
-	mux.HandleFunc("/api/v1/clipboard/toggle", s.handleClipboardToggle)
+	// Web UI management endpoints - local dashboard only, never called peer-to-peer,
+	// so these are restricted to loopback callers rather than exposed on the LAN.
+	mux.HandleFunc("/api/v1/devices", s.loopbackOnly(s.handleDevices))
+	mux.HandleFunc("/api/v1/devices/send", s.loopbackOnly(s.handleDevicesSend))
+	mux.HandleFunc("/api/v1/devices/pair", s.loopbackOnly(s.handleDevicesPair))
+	mux.HandleFunc("/api/v1/devices/remove", s.loopbackOnly(s.handleDevicesRemove))
+	mux.HandleFunc("/api/v1/clipboard/toggle", s.loopbackOnly(s.handleClipboardToggle))
 
 	// Protected endpoints (require trusted device token)
 	mux.HandleFunc("/api/v1/clipboard", s.authMiddleware(s.handleClipboard))
@@ -109,6 +110,24 @@ func (s *Server) Stop() error {
 		return s.httpServer.Close()
 	}
 	return nil
+}
+
+// loopbackOnly restricts a handler to callers connecting from localhost. It guards the
+// web dashboard's own management endpoints (device list/pair/remove, clipboard toggle),
+// which are never called peer-to-peer and must not be reachable from other LAN hosts.
+func (s *Server) loopbackOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			http.Error(w, "forbidden: this endpoint is only accessible from the local machine", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
