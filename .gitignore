@@ -1,0 +1,19 @@
+# Binaries and build artifacts
+crossover
+crossover-mac
+crossover.exe
+OmniDesk
+omnidesk
+dist/
+bin/
+
+# Go artifacts
+*.test
+*.out
+
+# OS & IDE files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
