@@ -239,3 +239,78 @@ func TestX11LiveKeyAndButtonRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestX11LiveContinuousMotionUnderSuppress verifies that when Suppress is active,
+// continuous motion in one direction does not clamp at the screen edge and
+// accurately forwards deltas without drops or jumps.
+func TestX11LiveContinuousMotionUnderSuppress(t *testing.T) {
+	if os.Getenv("OMNIDESK_X11_LIVE_TEST") == "" {
+		t.Skip("set OMNIDESK_X11_LIVE_TEST=1 to run against the local X server")
+	}
+
+	backend, err := newX11Backend()
+	if err != nil {
+		t.Fatalf("newX11Backend: %v", err)
+	}
+	b := backend.(*x11Backend)
+
+	origin, err := xproto.QueryPointer(b.conn, b.root).Reply()
+	if err != nil {
+		t.Fatalf("QueryPointer: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = b.Inject(MouseWarpEvent{X: uint16(origin.RootX), Y: uint16(origin.RootY)})
+	})
+
+	var mu sync.Mutex
+	var totalDX int32
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := b.Start(ctx, Callbacks{
+		OnMotion: func(absX, absY int, dx, dy int16) {
+			mu.Lock()
+			totalDX += int32(dx)
+			mu.Unlock()
+		},
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	if err := b.Suppress(); err != nil {
+		t.Fatalf("Suppress: %v", err)
+	}
+	defer b.Release()
+
+	// Give the initial warp to center time to settle.
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	totalDX = 0
+	mu.Unlock()
+
+	const steps = 40
+	const stepDelta = 20
+	expectedDX := int32(steps * stepDelta)
+
+	for i := 0; i < steps; i++ {
+		if err := b.Inject(MouseMoveEvent{DX: stepDelta, DY: 0}); err != nil {
+			t.Fatalf("Inject step %d: %v", i, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	gotDX := totalDX
+	mu.Unlock()
+
+	t.Logf("Continuous motion under Suppress: gotDX=%d, expectedDX=%d", gotDX, expectedDX)
+	if gotDX != expectedDX {
+		t.Errorf("Delta mismatch under Suppress: got %d, want %d", gotDX, expectedDX)
+	}
+}

@@ -352,24 +352,72 @@ func (m *Manager) AcceptSession(w http.ResponseWriter, r *http.Request, peerID s
 // mirroring the resulting cursor position, so hot-corner and edge-return
 // detection work without querying the OS on every event.
 func (m *Manager) injectAndTrack(ev Event) error {
+	var shouldReturn bool
+
 	m.mu.Lock()
 	switch e := ev.(type) {
 	case MouseWarpEvent:
-		m.cursorX, m.cursorY = int(e.X), int(e.Y)
+		// Clamp entry warp coordinates within local screen boundaries.
+		// If the sender had an inaccurate ScreenRect for this node (e.g. default 1920x1080
+		// while this display is 1728x1117 or 1512x982), an unclamped entry point can land
+		// right on or past the edge, causing an immediate bounce-back.
+		const inset = 20
+		x := int(e.X)
+		y := int(e.Y)
+		maxX := m.localRect.WidthPx - 1
+		maxY := m.localRect.HeightPx - 1
+
+		if maxX > 2*inset {
+			if x > maxX-inset {
+				x = maxX - inset
+			}
+			if x < inset {
+				x = inset
+			}
+		} else if maxX > 0 {
+			x = clampInt(x, 0, maxX)
+		}
+
+		if maxY > 2*inset {
+			if y > maxY-inset {
+				y = maxY - inset
+			}
+			if y < inset {
+				y = inset
+			}
+		} else if maxY > 0 {
+			y = clampInt(y, 0, maxY)
+		}
+
+		m.cursorX = x
+		m.cursorY = y
+		ev = MouseWarpEvent{X: uint16(x), Y: uint16(y)}
+
 	case MouseMoveEvent:
 		m.cursorX += int(e.DX)
 		m.cursorY += int(e.DY)
+		if m.localRect.WidthPx > 0 {
+			m.cursorX = clampInt(m.cursorX, 0, m.localRect.WidthPx-1)
+		}
+		if m.localRect.HeightPx > 0 {
+			m.cursorY = clampInt(m.cursorY, 0, m.localRect.HeightPx-1)
+		}
+
+		if m.active != nil && m.shouldRequestReturn(m.cursorX, m.cursorY, m.hotCorner) {
+			shouldReturn = true
+		}
 	}
-	x, y := m.cursorX, m.cursorY
-	corner := m.hotCorner
 	active := m.active
 	m.mu.Unlock()
 
-	if active != nil && m.shouldRequestReturn(x, y, corner) {
+	if shouldReturn && active != nil {
 		active.conn.SendRequestReturn()
 	}
 
-	return m.backend.Inject(ev)
+	if m.backend != nil {
+		return m.backend.Inject(ev)
+	}
+	return nil
 }
 
 // shouldRequestReturn reports whether the tracked cursor of a node
@@ -455,6 +503,7 @@ func (m *Manager) StopSession() {
 	if active == nil {
 		return
 	}
+	log.Printf("[inputshare] StopSession triggered for %s (role=%v)", active.peerID, active.r)
 	if active.r == roleSender {
 		active.conn.SendReleaseAll()
 		m.backend.Release()

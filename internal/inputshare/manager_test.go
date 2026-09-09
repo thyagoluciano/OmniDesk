@@ -108,3 +108,62 @@ func TestUnavailableReason(t *testing.T) {
 		t.Errorf("unexpected reason: %q", reason)
 	}
 }
+
+func TestInjectAndTrackClampsWarpAndDoesNotBounce(t *testing.T) {
+	layout := NewLayout()
+	layout.SetNode("mac", ScreenRect{WidthPx: 1728, HeightPx: 1117})
+	layout.SetNode("linux", ScreenRect{WidthPx: 1920, HeightPx: 1080})
+	_ = layout.SetLink(Link{
+		FromNode: "mac", FromEdge: EdgeRight,
+		ToNode: "linux", ToEdge: EdgeLeft,
+	})
+
+	conn := newConn(nil, "linux", roleReceiver)
+	m := &Manager{
+		localNodeID: "mac",
+		localRect:   ScreenRect{WidthPx: 1728, HeightPx: 1117},
+		layout:      layout,
+		active:      &activeSession{peerID: "linux", r: roleReceiver, conn: conn},
+	}
+
+	// 1. Sender (Linux) thought Mac was 1920 wide and sent Warp(1899, 500).
+	// Mac must clamp it inside bounds and NOT trigger a bounce-back.
+	if err := m.injectAndTrack(MouseWarpEvent{X: 1899, Y: 500}); err != nil {
+		t.Fatalf("injectAndTrack(MouseWarpEvent) failed: %v", err)
+	}
+
+	expectedX := 1728 - 1 - 20
+	if m.cursorX != expectedX {
+		t.Errorf("expected cursorX=%d after warp clamp, got %d", expectedX, m.cursorX)
+	}
+	if len(conn.reliableCh) != 0 {
+		t.Fatal("MouseWarpEvent must NEVER trigger RequestReturnEvent (immediate bounce bug)")
+	}
+
+	// 2. User moves mouse left (inward on Mac screen)
+	if err := m.injectAndTrack(MouseMoveEvent{DX: -50, DY: 0}); err != nil {
+		t.Fatalf("injectAndTrack(MouseMoveEvent) failed: %v", err)
+	}
+	if m.cursorX != expectedX-50 {
+		t.Errorf("expected cursorX=%d, got %d", expectedX-50, m.cursorX)
+	}
+	if len(conn.reliableCh) != 0 {
+		t.Fatal("Moving inward must not trigger return")
+	}
+
+	// 3. User intentionally moves mouse right past the right edge
+	if err := m.injectAndTrack(MouseMoveEvent{DX: 100, DY: 0}); err != nil {
+		t.Fatalf("injectAndTrack(MouseMoveEvent) failed: %v", err)
+	}
+	if m.cursorX != 1727 {
+		t.Errorf("expected cursorX clamped to 1727, got %d", m.cursorX)
+	}
+	if len(conn.reliableCh) != 1 {
+		t.Fatal("Pushing cursor past right edge MUST trigger RequestReturnEvent")
+	}
+	ev := <-conn.reliableCh
+	if _, ok := ev.(RequestReturnEvent); !ok {
+		t.Fatalf("expected RequestReturnEvent, got %T", ev)
+	}
+}
+

@@ -203,6 +203,7 @@ func (c *Conn) readLoop() {
 
 		switch ev.(type) {
 		case RequestReturnEvent:
+			log.Printf("[inputshare] connection with %s: received RequestReturnEvent from peer", c.peerID)
 			if c.onReturnReq != nil {
 				c.onReturnReq()
 			}
