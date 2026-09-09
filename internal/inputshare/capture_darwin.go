@@ -352,7 +352,6 @@ func (b *darwinBackend) dispatchFlagsChanged(event uintptr) {
 	}
 }
 
-
 // currentLocation returns the live global cursor position. CGEventCreate(NULL)
 // followed by CGEventGetLocation is the standard Quartz technique for
 // reading current input state without an existing event in hand — needed

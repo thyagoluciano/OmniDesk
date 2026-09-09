@@ -4,8 +4,8 @@ package ui
 
 import (
 	"fmt"
-	"log"
 	_ "image/png"
+	"log"
 	"os/exec"
 	"runtime"
 	"time"
