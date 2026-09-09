@@ -7,22 +7,55 @@
   <link rel="stylesheet" href="/ui/style.css">
 </head>
 <body>
-  <div class="app-container">
-    <!-- Top Header -->
-    <header class="top-header">
+  <div class="app-shell">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
       <div class="brand">
         <div class="logo-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4"/>
           </svg>
         </div>
         <div>
-          <h1>OmniDesk</h1>
-          <p class="subtitle">Sincronização P2P de Área de Transferência e Arquivos</p>
+          <div class="brand-name">OmniDesk</div>
+          <div class="brand-sub">Sincronização local</div>
         </div>
       </div>
 
-      <div class="header-actions">
+      <div class="nav-group-label">Principal</div>
+      <button class="nav-item active" data-tab="devices">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        <span class="nav-label">Dispositivos</span>
+        <span class="nav-badge" id="nav-trusted-badge">0</span>
+      </button>
+
+      <div class="nav-group-label">Funcionalidades</div>
+      <button class="nav-item" data-tab="clipboard">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+        <span class="nav-label">Área de Transferência</span>
+        <span class="nav-dot" id="nav-clipboard-dot"></span>
+      </button>
+      <button class="nav-item" data-tab="files">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span class="nav-label">Arquivos</span>
+        <span class="nav-dot" id="nav-files-dot"></span>
+      </button>
+      <button class="nav-item" data-tab="kvm">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4l7 17 2-7 7-2z"/></svg>
+        <span class="nav-label">Controle Remoto</span>
+        <span class="nav-dot off" id="nav-kvm-dot"></span>
+      </button>
+
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-footer">OmniDesk v0.1.0 &bull; P2P Local</div>
+    </aside>
+
+    <!-- Right column -->
+    <div class="main-col">
+
+      <!-- Top bar -->
+      <header class="topbar">
         <div class="local-node-card">
           <div class="status-dot pulse-online"></div>
           <div>
@@ -31,157 +64,221 @@
           </div>
         </div>
 
-        <button class="btn btn-secondary" id="btn-manual-scan" title="Escanear rede local">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-          </svg>
-          Escanear
-        </button>
-
-        <button class="btn btn-primary" id="btn-pair-pin">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-          </svg>
-          Aprovar PIN
-        </button>
-      </div>
-    </header>
-
-    <!-- Global Alert Banner for Incoming Pairing -->
-    <div id="pairing-banner" class="banner hidden">
-      <div class="banner-content">
-        <div class="banner-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-        </div>
-        <div>
-          <h4 id="banner-title">Solicitação de Pareamento Recebida!</h4>
-          <p id="banner-desc">O dispositivo ... quer conectar usando o PIN <strong>...</strong></p>
-        </div>
-      </div>
-      <div class="banner-actions">
-        <button class="btn btn-sm btn-success" id="btn-banner-approve">Autorizar Conexão</button>
-        <button class="btn btn-sm btn-outline" id="btn-banner-dismiss">Ignorar</button>
-      </div>
-    </div>
-
-    <!-- Main Content Area -->
-    <main class="main-content">
-      <!-- Controls Toolbar -->
-      <section class="toolbar-section">
-        <div class="toolbar-card">
-          <div class="toolbar-info">
-            <div class="toolbar-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
-              </svg>
-            </div>
-            <div>
-              <h3>Sincronização da Área de Transferência (Clipboard)</h3>
-              <p>Texto copiado neste computador sincroniza em tempo real com dispositivos conectados.</p>
-            </div>
-          </div>
-          <div class="toggle-wrapper">
-            <label class="switch">
-              <input type="checkbox" id="clipboard-toggle" checked>
-              <span class="slider round"></span>
-            </label>
-            <span class="toggle-label" id="clipboard-status-label">Ativo</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- Trusted Devices Section -->
-      <section class="section">
-        <div class="section-header">
-          <h2>Dispositivos Pareados &amp; Conectados</h2>
-          <span class="badge" id="trusted-count-badge">0 dispositivos</span>
-        </div>
-
-        <div id="trusted-devices-list" class="grid-devices">
-          <!-- Cards populated via app.js -->
-          <div class="empty-placeholder" id="empty-trusted-state">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-              <line x1="8" y1="21" x2="16" y2="21"/>
-              <line x1="12" y1="17" x2="12" y2="21"/>
+        <div class="topbar-actions">
+          <button class="btn btn-secondary" id="btn-manual-scan" title="Escanear rede local">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
             </svg>
-            <p>Nenhum dispositivo pareado ainda.</p>
-            <p class="hint">Pareie com seus outros computadores abaixo para sincronizar clipboard e arquivos.</p>
+            Escanear
+          </button>
+          <button class="btn btn-primary" id="btn-pair-pin">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            Aprovar PIN
+          </button>
+        </div>
+      </header>
+
+      <!-- Pending pairing banner -->
+      <div id="pairing-banner" class="banner hidden">
+        <div class="banner-content">
+          <div class="banner-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </div>
+          <div>
+            <h4 id="banner-title">Solicitação de Pareamento Recebida!</h4>
+            <p id="banner-desc">O dispositivo ... quer conectar usando o PIN <strong>...</strong></p>
           </div>
         </div>
-      </section>
-
-      <!-- Discovered Devices on LAN -->
-      <section class="section">
-        <div class="section-header">
-          <h2>Dispositivos Descobertos na Rede Local</h2>
-          <span class="badge badge-secondary" id="discovered-count-badge">0 na rede</span>
+        <div class="banner-actions">
+          <button class="btn btn-sm btn-success" id="btn-banner-approve">Autorizar</button>
+          <button class="btn btn-sm btn-outline" id="btn-banner-dismiss">Ignorar</button>
         </div>
+      </div>
 
-        <div id="discovered-devices-list" class="grid-devices">
-          <!-- Discovered cards populated via app.js -->
-        </div>
-      </section>
+      <!-- Scrollable content -->
+      <main class="content">
 
-      <!-- Input Sharing (KVM) Section -->
-      <section class="section">
-        <div class="section-header">
-          <h2>Controle de Mouse e Teclado (KVM)</h2>
-          <span class="badge badge-secondary" id="kvm-status-badge">Inativo</span>
-        </div>
-
-        <div id="kvm-pending-requests"></div>
-
-        <div class="toolbar-card" style="margin-bottom:16px;">
-          <div class="toolbar-info">
+        <!-- ===== Panel: Dispositivos ===== -->
+        <section class="panel" id="panel-devices">
+          <div class="panel-head">
             <div>
-              <h3>Permissões de controle por dispositivo</h3>
-              <p>Controlar o mouse/teclado de um dispositivo é uma permissão separada do pareamento — peça e aprove por dispositivo.</p>
+              <h1>Dispositivos</h1>
+              <p>Pareie computadores da rede local para liberar clipboard, arquivos e controle remoto entre eles.</p>
+            </div>
+            <button class="btn btn-secondary" id="btn-pair-request">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+              Parear por IP
+            </button>
+          </div>
+
+          <div class="subsection-head">
+            <h2>Pareados</h2>
+            <span class="badge" id="trusted-count-badge">0 dispositivos</span>
+          </div>
+          <div id="trusted-devices-list" class="row-list">
+            <div class="empty-placeholder" id="empty-trusted-state">
+              <p>Nenhum dispositivo pareado ainda.</p>
+              <p class="hint">Pareie com seus outros computadores abaixo para sincronizar clipboard e arquivos.</p>
             </div>
           </div>
-        </div>
-        <div id="kvm-permission-list" class="grid-devices"></div>
 
-        <div class="toolbar-card" style="margin: 20px 0 12px;">
-          <div class="toolbar-info">
+          <div class="subsection-head" style="margin-top:26px;">
+            <h2>Descobertos na rede</h2>
+            <span class="badge badge-secondary" id="discovered-count-badge">0 na rede</span>
+          </div>
+          <div id="discovered-devices-list" class="row-list"></div>
+        </section>
+
+        <!-- ===== Panel: Área de Transferência ===== -->
+        <section class="panel hidden" id="panel-clipboard">
+          <div class="panel-head">
             <div>
-              <h3>Arranjo das telas</h3>
-              <p>Arraste os retângulos para posicionar cada computador. Telas encostadas viram bordas de transição do cursor.</p>
+              <h1>Área de Transferência</h1>
+              <p>Texto copiado neste computador sincroniza automaticamente com os dispositivos pareados e online.</p>
+            </div>
+            <div class="module-toggle">
+              <span class="toggle-status-label" id="clipboard-status-label">Ativado</span>
+              <label class="switch">
+                <input type="checkbox" id="clipboard-toggle" checked>
+                <span class="slider round"></span>
+              </label>
             </div>
           </div>
-          <button class="btn btn-primary btn-sm" id="btn-save-layout">Salvar arranjo</button>
-        </div>
-        <div id="kvm-layout-canvas" class="kvm-canvas"></div>
 
-        <div class="toolbar-card" style="margin-top:16px;">
-          <div class="toolbar-info">
-            <div>
-              <h3>Escape: retorno rápido de controle</h3>
-              <p>Canto da tela que sempre devolve o controle para este computador, independente do arranjo.</p>
+          <div class="disabled-notice hidden" id="clipboard-disabled-notice">Recurso desativado — ative para voltar a sincronizar a área de transferência.</div>
+
+          <div class="module-content" id="clipboard-content">
+            <div class="info-card">
+              <div class="info-card-row">
+                <span class="live-dot"></span>
+                <span>Sincronização ativa</span>
+              </div>
+              <ul class="feature-list">
+                <li>Copiar texto em qualquer dispositivo pareado replica nos demais em tempo real.</li>
+                <li>Somente dispositivos pareados e online recebem o conteúdo.</li>
+              </ul>
             </div>
           </div>
-          <select id="kvm-hotcorner-select">
-            <option value="">Desativado</option>
-            <option value="top-left">Superior esquerdo</option>
-            <option value="top-right">Superior direito</option>
-            <option value="bottom-left">Inferior esquerdo</option>
-            <option value="bottom-right">Inferior direito</option>
-          </select>
-        </div>
-      </section>
-    </main>
 
-    <!-- Footer -->
-    <footer class="app-footer">
-      <span>OmniDesk v0.1.0 &bull; Conexão Local Direta P2P</span>
-      <span id="footer-storage-path">Pasta de Downloads: ~/Downloads/OmniDesk</span>
-    </footer>
+          <div class="history-section">
+            <div class="subsection-head">
+              <h2>Histórico de cópias</h2>
+              <span class="badge badge-secondary" id="history-count-badge">0</span>
+            </div>
+            <p class="hint" style="margin-bottom:12px;">Continua disponível mesmo com a sincronização pausada — só não recebe itens novos enquanto estiver desativada.</p>
+            <div id="clipboard-history-list" class="row-list">
+              <div class="empty-placeholder" id="empty-history-state"><p>Nada copiado ainda.</p></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Panel: Arquivos ===== -->
+        <section class="panel hidden" id="panel-files">
+          <div class="panel-head">
+            <div>
+              <h1>Arquivos</h1>
+              <p>Envie arquivos diretamente para qualquer dispositivo pareado e online.</p>
+            </div>
+            <div class="module-toggle">
+              <span class="toggle-status-label" id="files-status-label">Ativado</span>
+              <label class="switch">
+                <input type="checkbox" id="files-toggle" checked>
+                <span class="slider round"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="disabled-notice hidden" id="files-disabled-notice">Recurso desativado — ative para voltar a enviar e receber arquivos.</div>
+
+          <div class="module-content" id="files-content">
+            <div class="info-card" style="margin-bottom:16px;">
+              <div class="info-card-row">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
+                <div>
+                  <div class="muted-label">Pasta de downloads</div>
+                  <div class="mono-value" id="footer-storage-path">~/Downloads/OmniDesk</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="info-card">
+              <div class="muted-label" style="margin-bottom:10px;">Enviar arquivo para</div>
+              <select id="files-target-select" class="select-input"></select>
+              <div class="dropzone" id="files-dropzone">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <div class="dropzone-label">Arraste um arquivo aqui</div>
+                <div class="dropzone-hint">ou clique para selecionar</div>
+                <div class="transfer-progress-bar hidden" id="files-progress"><div class="transfer-progress-fill" id="files-progress-fill"></div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Panel: Controle Remoto (KVM) ===== -->
+        <section class="panel hidden" id="panel-kvm">
+          <div class="panel-head">
+            <div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <h1 style="margin-bottom:0;">Controle Remoto</h1>
+                <span class="beta-tag">Beta</span>
+              </div>
+              <p>Compartilhe mouse e teclado entre os computadores pareados como se fossem um só.</p>
+            </div>
+            <div class="module-toggle">
+              <span class="toggle-status-label" id="kvm-status-label">Desativado</span>
+              <label class="switch">
+                <input type="checkbox" id="kvm-toggle">
+                <span class="slider round"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="connection-badge-row">
+            <span class="badge badge-secondary" id="kvm-status-badge">Inativo</span>
+          </div>
+
+          <div class="disabled-notice hidden" id="kvm-disabled-notice">Recurso desativado — ative para pedir ou conceder controle de mouse/teclado.</div>
+
+          <div class="module-content" id="kvm-content">
+            <div id="kvm-pending-requests"></div>
+
+            <div class="subsection-head">
+              <h2>Permissões por dispositivo</h2>
+            </div>
+            <div id="kvm-permission-list" class="row-list"></div>
+
+            <div class="subsection-head" style="margin-top:24px;">
+              <h2>Arranjo das telas</h2>
+              <button class="btn btn-primary btn-sm" id="btn-save-layout">Salvar arranjo</button>
+            </div>
+            <p class="hint" style="margin-bottom:10px;">Arraste os retângulos para posicionar cada computador. Telas encostadas viram bordas de transição do cursor.</p>
+            <div id="kvm-layout-canvas" class="kvm-canvas"></div>
+
+            <div class="info-card" style="margin-top:20px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
+              <div style="flex:1;min-width:0;">
+                <div class="muted-label" style="margin-bottom:2px;">Escape: retorno rápido de controle</div>
+                <div class="hint">Canto da tela que sempre devolve o controle para este computador.</div>
+              </div>
+              <select id="kvm-hotcorner-select" class="select-input" style="flex:0 0 auto;width:auto;margin-bottom:0;">
+                <option value="">Desativado</option>
+                <option value="top-left">Superior esquerdo</option>
+                <option value="top-right">Superior direito</option>
+                <option value="bottom-left">Inferior esquerdo</option>
+                <option value="bottom-right">Inferior direito</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
   </div>
 
   <!-- Modal: Manual PIN Approval -->
@@ -234,7 +331,27 @@
     </div>
   </div>
 
-  <!-- Hidden File Input for Card-triggered uploads -->
+  <!-- Modal: Generic Confirmation -->
+  <div class="modal-backdrop hidden" id="modal-confirm">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="confirm-title">Confirmar ação</h3>
+        <button class="modal-close" id="btn-close-confirm-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-message"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-confirm-cancel">Cancelar</button>
+        <button class="btn btn-danger" id="btn-confirm-ok">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Hidden File Input for card/dropzone-triggered uploads -->
   <input type="file" id="global-file-input" style="display:none;" multiple>
 
   <script src="/ui/app.js"></script>

@@ -185,6 +185,14 @@ func (m *Manager) ActiveSession() (peerID string, sending bool, ok bool) {
 // sharing is disabled but the rest of OmniDesk keeps working — mirroring
 // how clipboard degrades gracefully when running headless.
 func (m *Manager) Start(ctx context.Context) error {
+	// Clear any reason left over from a previous failed attempt (e.g. the
+	// user granted the missing permission and is retrying via the
+	// dashboard toggle) so success here doesn't keep reporting a stale
+	// error.
+	m.mu.Lock()
+	m.unavailableReason = ""
+	m.mu.Unlock()
+
 	backend, err := NewBackend()
 	if err != nil {
 		m.setUnavailable(err)

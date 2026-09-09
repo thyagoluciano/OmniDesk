@@ -56,11 +56,49 @@ func OpenDashboard(port int) {
 		_ = cmd.Start()
 
 	case "darwin":
-		// On macOS, try launching standalone Chrome app window if present
-		appCmd := exec.Command("open", "-na", "Google Chrome", "--args", fmt.Sprintf("--app=%s", url))
-		if err := appCmd.Run(); err == nil {
-			log.Println("[ui] Opened dashboard in standalone window via macOS Chrome")
+		// Chrome's own single-instance-per-profile forwarding stops a
+		// second `--app=` launch from spawning a whole extra OS process,
+		// but the forwarded launch still opens an *additional app window*
+		// rather than focusing the existing one — so that alone doesn't
+		// stop duplicate windows. activateMacDashboardWindow (window_darwin.go)
+		// tracks the PID of the window we launched ourselves and, if it's
+		// still alive, just brings it forward instead.
+		if activateMacDashboardWindow() {
+			log.Println("[ui] Focused existing dashboard window")
 			return
+		}
+
+		// Give the app-mode window its own dedicated Chrome profile, same
+		// as the Linux branch above, and launch the binary directly
+		// instead of going through `open -na` (which forces Launch
+		// Services to spawn a brand new process every time).
+		cacheDir, _ := os.UserCacheDir()
+		if cacheDir == "" {
+			cacheDir = "/tmp"
+		}
+		profileDir := filepath.Join(cacheDir, "omnidesk-ui")
+		_ = os.MkdirAll(profileDir, 0755)
+
+		chromeCandidates := []string{
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			filepath.Join(os.Getenv("HOME"), "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+		}
+		for _, chromePath := range chromeCandidates {
+			if _, err := os.Stat(chromePath); err != nil {
+				continue
+			}
+			cmd := exec.Command(
+				chromePath,
+				fmt.Sprintf("--app=%s", url),
+				fmt.Sprintf("--user-data-dir=%s", profileDir),
+				"--no-first-run",
+				"--no-default-browser-check",
+			)
+			if err := cmd.Start(); err == nil {
+				recordMacDashboardPID(cmd.Process.Pid)
+				log.Println("[ui] Opened dashboard in standalone window via macOS Chrome")
+				return
+			}
 		}
 
 		// Fallback to default browser (Safari/Chrome)

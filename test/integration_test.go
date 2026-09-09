@@ -18,21 +18,25 @@ func TestFullE2EFlow(t *testing.T) {
 	tempB := t.TempDir()
 
 	cfgA := &config.Config{
-		DeviceID:       "node-macbook-1",
-		DeviceName:     "MacBook Pro 1",
-		ListenPort:     24891,
-		DownloadDir:    filepath.Join(tempA, "downloads"),
-		ClipboardSync:  true,
-		TrustedDevices: make(map[string]config.TrustedDevice),
+		DeviceID:          "node-macbook-1",
+		DeviceName:        "MacBook Pro 1",
+		ListenPort:        24891,
+		DownloadDir:       filepath.Join(tempA, "downloads"),
+		ClipboardSync:     true,
+		FilesSync:         true,
+		InputShareEnabled: true,
+		TrustedDevices:    make(map[string]config.TrustedDevice),
 	}
 
 	cfgB := &config.Config{
-		DeviceID:       "node-linux-desktop",
-		DeviceName:     "Ubuntu Desktop",
-		ListenPort:     24892,
-		DownloadDir:    filepath.Join(tempB, "downloads"),
-		ClipboardSync:  true,
-		TrustedDevices: make(map[string]config.TrustedDevice),
+		DeviceID:          "node-linux-desktop",
+		DeviceName:        "Ubuntu Desktop",
+		ListenPort:        24892,
+		DownloadDir:       filepath.Join(tempB, "downloads"),
+		ClipboardSync:     true,
+		FilesSync:         true,
+		InputShareEnabled: true,
+		TrustedDevices:    make(map[string]config.TrustedDevice),
 	}
 
 	_ = os.MkdirAll(cfgA.DownloadDir, 0755)

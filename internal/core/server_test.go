@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"omnidesk/internal/clipboard"
 	"omnidesk/internal/config"
 	"omnidesk/internal/pairing"
 )
@@ -26,15 +27,23 @@ func (m *mockClipHandler) IsSyncEnabled() bool {
 	return true
 }
 
+func (m *mockClipHandler) GetHistory() []clipboard.HistoryEntry {
+	return nil
+}
+
+func (m *mockClipHandler) RemoveHistoryEntry(id string) {}
+
 func TestServerPairingAndAuth(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.Config{
-		DeviceID:       "node-b",
-		DeviceName:     "Linux-Desktop",
-		ListenPort:     24850,
-		DownloadDir:    tempDir,
-		ClipboardSync:  true,
-		TrustedDevices: make(map[string]config.TrustedDevice),
+		DeviceID:          "node-b",
+		DeviceName:        "Linux-Desktop",
+		ListenPort:        24850,
+		DownloadDir:       tempDir,
+		ClipboardSync:     true,
+		FilesSync:         true,
+		InputShareEnabled: true,
+		TrustedDevices:    make(map[string]config.TrustedDevice),
 	}
 
 	pMgr := pairing.NewManager(cfg)

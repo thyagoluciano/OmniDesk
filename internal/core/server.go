@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"omnidesk/internal/clipboard"
 	"omnidesk/internal/config"
 	"omnidesk/internal/discovery"
 	"omnidesk/internal/inputshare"
@@ -24,6 +25,8 @@ import (
 type ClipboardHandler interface {
 	InjectRemoteClipboard(text string, senderID string) error
 	IsSyncEnabled() bool
+	GetHistory() []clipboard.HistoryEntry
+	RemoveHistoryEntry(id string)
 }
 
 // FileNotificationHandler triggers native desktop notifications for received files.
@@ -83,6 +86,10 @@ func (s *Server) Start(port int) error {
 	mux.HandleFunc("/api/v1/devices/pair", s.loopbackOnly(s.handleDevicesPair))
 	mux.HandleFunc("/api/v1/devices/remove", s.loopbackOnly(s.handleDevicesRemove))
 	mux.HandleFunc("/api/v1/clipboard/toggle", s.loopbackOnly(s.handleClipboardToggle))
+	mux.HandleFunc("/api/v1/clipboard/history", s.loopbackOnly(s.handleClipboardHistory))
+	mux.HandleFunc("/api/v1/clipboard/history/remove", s.loopbackOnly(s.handleClipboardHistoryRemove))
+	mux.HandleFunc("/api/v1/files/toggle", s.loopbackOnly(s.handleFilesToggle))
+	mux.HandleFunc("/api/v1/input/toggle", s.loopbackOnly(s.handleInputToggle))
 
 	// Protected endpoints (require trusted device token)
 	mux.HandleFunc("/api/v1/clipboard", s.authMiddleware(s.handleClipboard))
@@ -176,12 +183,14 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
-		"device_id":      s.cfg.DeviceID,
-		"device_name":    s.cfg.DeviceName,
-		"clipboard_sync": s.cfg.IsClipboardSyncEnabled(),
-		"port":           s.cfg.ListenPort,
-		"download_dir":   s.cfg.DownloadDir,
-		"status":         "online",
+		"device_id":           s.cfg.DeviceID,
+		"device_name":         s.cfg.DeviceName,
+		"clipboard_sync":      s.cfg.IsClipboardSyncEnabled(),
+		"files_sync":          s.cfg.IsFilesSyncEnabled(),
+		"input_share_enabled": s.cfg.IsInputShareEnabled(),
+		"port":                s.cfg.ListenPort,
+		"download_dir":        s.cfg.DownloadDir,
+		"status":              "online",
 	}
 	if s.node != nil && s.node.InputMgr != nil {
 		rect := s.node.InputMgr.LocalRect()
@@ -317,6 +326,10 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.cfg.IsFilesSyncEnabled() {
+		http.Error(w, "file transfer is disabled on this device", http.StatusForbidden)
+		return
+	}
 
 	senderID := r.Header.Get("X-OmniDesk-Device-ID")
 	senderDev, _ := s.cfg.GetTrustedDevice(senderID)
@@ -374,6 +387,10 @@ func (s *Server) handleInputWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "input sharing not available", http.StatusServiceUnavailable)
 		return
 	}
+	if !s.cfg.IsInputShareEnabled() {
+		http.Error(w, "input sharing is disabled on this device", http.StatusForbidden)
+		return
+	}
 	peerID := r.Header.Get("X-OmniDesk-Device-ID")
 	if err := s.node.InputMgr.AcceptSession(w, r, peerID); err != nil {
 		// AcceptSession only writes to w itself once it has successfully
@@ -394,6 +411,10 @@ func (s *Server) handleInputPermissionRequest(w http.ResponseWriter, r *http.Req
 	}
 	if s.node == nil || s.node.InputMgr == nil {
 		http.Error(w, "input sharing not available", http.StatusServiceUnavailable)
+		return
+	}
+	if !s.cfg.IsInputShareEnabled() {
+		http.Error(w, "input sharing is disabled on this device", http.StatusForbidden)
 		return
 	}
 
@@ -491,6 +512,10 @@ func (s *Server) handleInputPermissionRevoke(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleInputPermissionAsk(w http.ResponseWriter, r *http.Request) {
 	deviceID, ok := s.decodeDeviceIDBody(w, r)
 	if !ok {
+		return
+	}
+	if !s.cfg.IsInputShareEnabled() {
+		http.Error(w, "input sharing is disabled on this device", http.StatusForbidden)
 		return
 	}
 	if err := s.node.InputMgr.RequestControlOf(r.Context(), deviceID); err != nil {
@@ -694,6 +719,88 @@ func (s *Server) handleClipboardToggle(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleClipboardHistory returns the in-memory list of recently copied
+// values (never persisted to disk — see clipboard.HistoryEntry) so the
+// dashboard can show what was copied and where it came from.
+func (s *Server) handleClipboardHistory(w http.ResponseWriter, r *http.Request) {
+	if s.clipHandler == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]clipboard.HistoryEntry{})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.clipHandler.GetHistory())
+}
+
+func (s *Server) handleClipboardHistoryRemove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
+		http.Error(w, "id is required", http.StatusBadRequest)
+		return
+	}
+	if s.clipHandler != nil {
+		s.clipHandler.RemoveHistoryEntry(body.ID)
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"success":true}`))
+}
+
+func (s *Server) handleFilesToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	_ = s.cfg.SetFilesSync(body.Enabled)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"files_sync": body.Enabled,
+	})
+}
+
+func (s *Server) handleInputToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	// Node.SetInputShareEnabled both persists the config flag and actually
+	// engages/releases the platform capture backend, so turning it on in
+	// the dashboard is the one moment the macOS Accessibility/Input
+	// Monitoring check (and, if needed, the system consent prompt)
+	// happens — never at every boot.
+	if s.node != nil {
+		if err := s.node.SetInputShareEnabled(body.Enabled); err != nil {
+			log.Printf("[server] failed to start inputshare after enabling: %v", err)
+		}
+	} else {
+		_ = s.cfg.SetInputShareEnabled(body.Enabled)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"input_share_enabled": body.Enabled,
+	})
+}
+
 func (s *Server) handleDevicesPair(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -786,6 +893,10 @@ func (s *Server) handleDevicesRemove(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDevicesSend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.cfg.IsFilesSyncEnabled() {
+		http.Error(w, "file transfer is disabled on this device", http.StatusForbidden)
 		return
 	}
 

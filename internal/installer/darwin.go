@@ -29,6 +29,29 @@ const launchAgentPlist = `<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 `
 
+// stableSigningIdentity names the local, self-signed code-signing
+// certificate `scripts/setup-local-signing.sh` creates in the login
+// keychain. Signing with it (instead of ad-hoc `-s -`) matters because
+// macOS TCC ties Accessibility/Input Monitoring grants to the code's
+// designated requirement — which for an ad-hoc signature is derived from
+// the binary's own content hash and therefore changes on every rebuild,
+// silently invalidating the grant. A certificate-backed signature's
+// requirement is instead tied to the (stable, reused) certificate, so
+// permissions survive rebuilds as long as the same identity keeps signing
+// the app.
+const stableSigningIdentity = "OmniDesk Local Dev"
+
+// codesignApp signs appDst with the stable local identity, falling back
+// to ad-hoc signing when that identity isn't present on this machine
+// (e.g. a fresh dev setup that hasn't run scripts/setup-local-signing.sh
+// yet) — degrades gracefully rather than failing the install.
+func codesignApp(appDst string) {
+	if err := exec.Command("codesign", "--force", "--deep", "-s", stableSigningIdentity, appDst).Run(); err != nil {
+		fmt.Printf("Aviso: identidade de assinatura local (%s) indisponível, usando ad-hoc — talvez seja preciso reconceder permissões do sistema depois: %v\n", stableSigningIdentity, err)
+		_ = exec.Command("codesign", "--force", "--deep", "-s", "-", appDst).Run()
+	}
+}
+
 // InstallDarwin configures the macOS LaunchAgent autostart service and unblocks Gatekeeper.
 func InstallDarwin(autostart bool) error {
 	home, err := os.UserHomeDir()
@@ -51,12 +74,11 @@ func InstallDarwin(autostart bool) error {
 		}
 	}
 
-	// 2. Remove quarantine and ad-hoc sign with local toolchain to fix "App está danificado"
+	// 2. Remove quarantine and sign with local toolchain to fix "App está danificado"
 	if _, err := os.Stat(appDst); err == nil {
 		fmt.Println("-> Removendo quarentena do Gatekeeper (xattr -cr)...")
 		_ = exec.Command("xattr", "-cr", appDst).Run()
-		fmt.Println("-> Aplicando assinatura ad-hoc local (codesign)...")
-		_ = exec.Command("codesign", "--force", "--deep", "-s", "-", appDst).Run()
+		codesignApp(appDst)
 		_ = exec.Command("chmod", "+x", filepath.Join(appDst, "Contents", "MacOS", "omnidesk")).Run()
 	}
 

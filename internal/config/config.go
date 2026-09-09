@@ -67,15 +67,17 @@ type InputShareConfig struct {
 
 // Config stores local node configuration and trusted peers.
 type Config struct {
-	mu             sync.RWMutex
-	DeviceID       string                   `json:"device_id"`
-	DeviceName     string                   `json:"device_name"`
-	ListenPort     int                      `json:"listen_port"`
-	DownloadDir    string                   `json:"download_dir"`
-	ClipboardSync  bool                     `json:"clipboard_sync"`
-	TrustedDevices map[string]TrustedDevice `json:"trusted_devices"` // key is DeviceID
-	InputShare     InputShareConfig         `json:"input_share"`
-	configPath     string
+	mu                sync.RWMutex
+	DeviceID          string                   `json:"device_id"`
+	DeviceName        string                   `json:"device_name"`
+	ListenPort        int                      `json:"listen_port"`
+	DownloadDir       string                   `json:"download_dir"`
+	ClipboardSync     bool                     `json:"clipboard_sync"`
+	FilesSync         bool                     `json:"files_sync"`
+	InputShareEnabled bool                     `json:"input_share_enabled"`
+	TrustedDevices    map[string]TrustedDevice `json:"trusted_devices"` // key is DeviceID
+	InputShare        InputShareConfig         `json:"input_share"`
+	configPath        string
 }
 
 // DefaultConfigDir returns the default directory for omnidesk configuration.
@@ -110,12 +112,17 @@ func Load() (*Config, error) {
 
 	cfgPath := filepath.Join(dir, "config.json")
 	cfg := &Config{
-		ListenPort:     24850,
-		DownloadDir:    downloadDir,
-		ClipboardSync:  true,
-		TrustedDevices: make(map[string]TrustedDevice),
-		InputShare:     InputShareConfig{Nodes: make(map[string]ScreenNode)},
-		configPath:     cfgPath,
+		ListenPort:    24850,
+		DownloadDir:   downloadDir,
+		ClipboardSync: true,
+		FilesSync:     true,
+		// InputShareEnabled (Controle Remoto / KVM) defaults to OFF: the
+		// feature is still beta and shouldn't surprise a fresh install.
+		// The dashboard shows a beta warning before a user opts in.
+		InputShareEnabled: false,
+		TrustedDevices:    make(map[string]TrustedDevice),
+		InputShare:        InputShareConfig{Nodes: make(map[string]ScreenNode)},
+		configPath:        cfgPath,
 	}
 
 	hostname, _ := os.Hostname()
@@ -226,6 +233,36 @@ func (c *Config) IsClipboardSyncEnabled() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.ClipboardSync
+}
+
+// SetFilesSync toggles file transfer.
+func (c *Config) SetFilesSync(enabled bool) error {
+	c.mu.Lock()
+	c.FilesSync = enabled
+	c.mu.Unlock()
+	return c.Save()
+}
+
+// IsFilesSyncEnabled returns whether file transfer is enabled.
+func (c *Config) IsFilesSyncEnabled() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.FilesSync
+}
+
+// SetInputShareEnabled toggles input sharing (KVM-style mouse/keyboard control).
+func (c *Config) SetInputShareEnabled(enabled bool) error {
+	c.mu.Lock()
+	c.InputShareEnabled = enabled
+	c.mu.Unlock()
+	return c.Save()
+}
+
+// IsInputShareEnabled returns whether input sharing is enabled.
+func (c *Config) IsInputShareEnabled() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.InputShareEnabled
 }
 
 // GetInputShareConfig returns a copy of the persisted screen layout and

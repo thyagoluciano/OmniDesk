@@ -74,10 +74,25 @@ func (t *TrayApp) onReady() {
 	}
 	mClipToggle := systray.AddMenuItem(clipTitle, "Ativar/desativar cópia e cola entre máquinas")
 
+	// Files toggle
+	filesTitle := "Pausar sincronização de arquivos"
+	if !t.node.Cfg.IsFilesSyncEnabled() {
+		filesTitle = "Retomar sincronização de arquivos"
+	}
+	mFilesToggle := systray.AddMenuItem(filesTitle, "Ativar/desativar envio e recebimento de arquivos")
+
 	// Open downloads folder
 	mOpenDownloads := systray.AddMenuItem("Abrir pasta de recebidos", "Abrir ~/Downloads/OmniDesk")
 
 	systray.AddSeparator()
+
+	// Input-sharing (KVM) master toggle — still beta, so enabling it from
+	// here asks the same confirmation the dashboard shows (confirmEnableInputShare).
+	kvmToggleTitle := "Ativar controle remoto (Beta)"
+	if t.node.Cfg.IsInputShareEnabled() {
+		kvmToggleTitle = "Desativar controle remoto"
+	}
+	mInputToggle := systray.AddMenuItem(kvmToggleTitle, "Compartilhar mouse/teclado entre dispositivos pareados (recurso em beta)")
 
 	// Input-sharing (KVM) status/escape item — a quick way to reclaim
 	// mouse/keyboard control without touching the dashboard, per
@@ -134,8 +149,28 @@ func (t *TrayApp) onReady() {
 					mClipToggle.SetTitle("Retomar sincronização de clipboard")
 				}
 
+			case <-mFilesToggle.ClickedCh:
+				enabled := !t.node.Cfg.IsFilesSyncEnabled()
+				_ = t.node.Cfg.SetFilesSync(enabled)
+				if enabled {
+					mFilesToggle.SetTitle("Pausar sincronização de arquivos")
+				} else {
+					mFilesToggle.SetTitle("Retomar sincronização de arquivos")
+				}
+
 			case <-mOpenDownloads.ClickedCh:
 				openFolder(t.node.Cfg.DownloadDir)
+
+			case <-mInputToggle.ClickedCh:
+				if t.node.Cfg.IsInputShareEnabled() {
+					_ = t.node.SetInputShareEnabled(false)
+					mInputToggle.SetTitle("Ativar controle remoto (Beta)")
+				} else if confirmEnableInputShare() {
+					if err := t.node.SetInputShareEnabled(true); err != nil {
+						log.Printf("[tray] falha ao ativar controle remoto: %v", err)
+					}
+					mInputToggle.SetTitle("Desativar controle remoto")
+				}
 
 			case <-mInputStatus.ClickedCh:
 				if t.node.InputMgr != nil {
@@ -153,6 +188,39 @@ func (t *TrayApp) onReady() {
 func (t *TrayApp) onExit() {
 	log.Println("[ui] exiting OmniDesk tray application")
 	t.node.Stop()
+}
+
+// confirmEnableInputShare shows a short native warning before enabling
+// Controle Remoto from the tray — the same beta caveat the dashboard
+// shows in its own confirmation modal, since the tray has no HTML UI to
+// draw one in. Returns true only if the user explicitly confirmed; on a
+// desktop with no dialog tool available it logs and lets the toggle
+// through rather than blocking the feature (the dashboard's confirmation
+// remains the primary safeguard for that path).
+func confirmEnableInputShare() bool {
+	const msg = "Este recurso ainda está em fase beta e pode apresentar instabilidades — perda de conexão do mouse/teclado, travamentos ou comportamento inesperado. Deseja ativar mesmo assim?"
+
+	switch runtime.GOOS {
+	case "darwin":
+		script := fmt.Sprintf(
+			`display dialog %q with title "Controle Remoto (Beta)" buttons {"Cancelar", "Ativar assim mesmo"} default button "Cancelar" cancel button "Cancelar"`,
+			msg,
+		)
+		return exec.Command("osascript", "-e", script).Run() == nil
+
+	case "linux":
+		if path, err := exec.LookPath("zenity"); err == nil {
+			return exec.Command(path, "--question", "--title=Controle Remoto (Beta)", "--text="+msg).Run() == nil
+		}
+		if path, err := exec.LookPath("kdialog"); err == nil {
+			return exec.Command(path, "--title", "Controle Remoto (Beta)", "--yesno", msg).Run() == nil
+		}
+		log.Println("[tray] nenhum diálogo nativo disponível (zenity/kdialog) — ativando controle remoto sem confirmação extra")
+		return true
+
+	default:
+		return true
+	}
 }
 
 func openFolder(path string) {

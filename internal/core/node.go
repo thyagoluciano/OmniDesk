@@ -76,15 +76,39 @@ func (n *Node) Start(ctx context.Context) error {
 	}
 
 	// Start input-sharing (KVM) capture/injection backend, if the platform
-	// supports one. Degrades gracefully otherwise, exactly like clipboard.
-	if err := n.InputMgr.Start(n.ctx); err != nil {
-		log.Printf("[node] inputshare warning: %v", err)
+	// supports one AND the user has opted into the feature (Controle Remoto
+	// is beta and OFF by default — see internal/config). Starting it
+	// unconditionally would trigger the macOS Accessibility prompt/check on
+	// every boot even for users who never touch the feature.
+	if n.Cfg.IsInputShareEnabled() {
+		if err := n.InputMgr.Start(n.ctx); err != nil {
+			log.Printf("[node] inputshare warning: %v", err)
+		}
 	}
 
 	// Start Subnet Probe loop to discover peers over unicast HTTP (bypasses Wi-Fi mDNS blocks)
 	go n.subnetProbeLoop(n.ctx)
 
 	log.Printf("[node] OmniDesk running as '%s' (ID: %s) on port %d", n.Cfg.DeviceName, n.Cfg.DeviceID, n.Cfg.ListenPort)
+	return nil
+}
+
+// SetInputShareEnabled persists the Controle Remoto (KVM) preference and
+// starts or stops the platform capture backend to match — the one place
+// that actually engages/releases the OS-level input hooks, shared by the
+// dashboard toggle (server.go) and the tray menu (ui/systray.go) so
+// neither one can flip the config flag without the backend following it.
+func (n *Node) SetInputShareEnabled(enabled bool) error {
+	if err := n.Cfg.SetInputShareEnabled(enabled); err != nil {
+		return err
+	}
+	if n.InputMgr == nil {
+		return nil
+	}
+	if enabled {
+		return n.InputMgr.Start(n.ctx)
+	}
+	n.InputMgr.Stop()
 	return nil
 }
 

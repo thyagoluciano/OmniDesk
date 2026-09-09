@@ -4,20 +4,192 @@ let localNode = null;
 let currentPendingPIN = null;
 let selectedTargetForUpload = null;
 let trustedDevicesCache = [];
+let discoveredDevicesCache = [];
+let filesSyncEnabled = true;
+let openSendRowId = null;
 
 document.addEventListener("DOMContentLoaded", () => {
+  setupTabNav();
   initApp();
   setupEventListeners();
+  setupModuleToggles();
   setupKvmEventListeners();
   // Poll every 3 seconds
   setInterval(refreshDevicesAndStatus, 3000);
   setInterval(refreshKvm, 3000);
+  setInterval(refreshClipboardHistory, 4000);
 });
 
 async function initApp() {
   await refreshDevicesAndStatus();
   await refreshKvm();
+  await refreshClipboardHistory();
 }
+
+// ---------------------------------------------------------------------
+// Toasts and confirmation modal (replace native alert()/confirm(), which
+// render as unstyled OS dialogs that clash with the app's dark theme).
+// ---------------------------------------------------------------------
+
+const TOAST_ICONS = {
+  success: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>`,
+  error: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+  info: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`
+};
+
+function showToast(message, type, duration) {
+  type = type || "info";
+  duration = duration === undefined ? 3800 : duration;
+
+  const container = document.getElementById("toast-container");
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <span class="toast-icon">${TOAST_ICONS[type] || TOAST_ICONS.info}</span>
+    <span class="toast-text">${escapeHtml(message)}</span>
+    <button class="toast-close" aria-label="Fechar">&times;</button>
+  `;
+
+  const remove = () => {
+    toast.classList.add("toast-out");
+    setTimeout(() => toast.remove(), 150);
+  };
+  toast.querySelector(".toast-close").addEventListener("click", remove);
+
+  container.appendChild(toast);
+  if (duration > 0) setTimeout(remove, duration);
+}
+
+function showConfirm(title, message, confirmLabel) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("modal-confirm");
+    document.getElementById("confirm-title").textContent = title;
+    document.getElementById("confirm-message").textContent = message;
+
+    const okBtn = document.getElementById("btn-confirm-ok");
+    const cancelBtn = document.getElementById("btn-confirm-cancel");
+    const closeBtn = document.getElementById("btn-close-confirm-modal");
+    okBtn.textContent = confirmLabel || "Confirmar";
+
+    const cleanup = (result) => {
+      modal.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      closeBtn.removeEventListener("click", onCancel);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    closeBtn.addEventListener("click", onCancel);
+
+    modal.classList.remove("hidden");
+  });
+}
+
+// ---------------------------------------------------------------------
+// Sidebar navigation
+// ---------------------------------------------------------------------
+
+function setupTabNav() {
+  document.querySelectorAll(".nav-item").forEach((item) => {
+    item.addEventListener("click", () => {
+      const tab = item.dataset.tab;
+      document.querySelectorAll(".nav-item").forEach((el) => el.classList.toggle("active", el === item));
+      document.querySelectorAll(".panel").forEach((panel) => {
+        panel.classList.toggle("hidden", panel.id !== `panel-${tab}`);
+      });
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
+// Module master toggles (clipboard / files / input sharing)
+// ---------------------------------------------------------------------
+
+function setupModuleToggles() {
+  document.getElementById("clipboard-toggle").addEventListener("change", async (e) => {
+    try {
+      const resp = await fetch("/api/v1/clipboard/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: e.target.checked })
+      });
+      const data = await resp.json();
+      applyModuleState("clipboard", data.clipboard_sync);
+    } catch (err) {
+      console.error("Falha ao alterar sincronização de clipboard:", err);
+    }
+  });
+
+  document.getElementById("files-toggle").addEventListener("change", async (e) => {
+    try {
+      const resp = await fetch("/api/v1/files/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: e.target.checked })
+      });
+      const data = await resp.json();
+      applyModuleState("files", data.files_sync);
+      await refreshDevicesAndStatus(); // re-render device rows so the send-file button shows/hides
+    } catch (err) {
+      console.error("Falha ao alterar sincronização de arquivos:", err);
+    }
+  });
+
+  document.getElementById("kvm-toggle").addEventListener("change", async (e) => {
+    const enabling = e.target.checked;
+
+    if (enabling) {
+      const confirmed = await showConfirm(
+        "Controle Remoto (Beta)",
+        "Este recurso ainda está em fase beta e pode apresentar instabilidades — perda de conexão do mouse/teclado, travamentos ou comportamento inesperado. Deseja ativar mesmo assim?",
+        "Ativar assim mesmo"
+      );
+      if (!confirmed) {
+        e.target.checked = false;
+        return;
+      }
+    }
+
+    try {
+      const resp = await fetch("/api/v1/input/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: enabling })
+      });
+      const data = await resp.json();
+      applyModuleState("kvm", data.input_share_enabled);
+    } catch (err) {
+      console.error("Falha ao alterar controle remoto:", err);
+      e.target.checked = !enabling;
+    }
+  });
+}
+
+function applyModuleState(module, enabled) {
+  const toggle = document.getElementById(`${module}-toggle`);
+  const label = document.getElementById(`${module}-status-label`);
+  const notice = document.getElementById(`${module}-disabled-notice`);
+  const content = document.getElementById(`${module}-content`);
+  const dot = document.getElementById(`nav-${module}-dot`);
+
+  toggle.checked = !!enabled;
+  label.textContent = enabled ? "Ativado" : "Desativado";
+  notice.classList.toggle("hidden", !!enabled);
+  content.classList.toggle("disabled", !enabled);
+  dot.classList.toggle("off", !enabled);
+
+  if (module === "files") {
+    filesSyncEnabled = !!enabled;
+  }
+}
+
+// ---------------------------------------------------------------------
+// General event wiring (pairing, scan, modals)
+// ---------------------------------------------------------------------
 
 function setupEventListeners() {
   // Manual Scan
@@ -31,22 +203,6 @@ function setupEventListeners() {
         btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> Escanear`;
       }, 800);
     });
-  });
-
-  // Clipboard toggle
-  const clipToggle = document.getElementById("clipboard-toggle");
-  clipToggle.addEventListener("change", async () => {
-    try {
-      const resp = await fetch("/api/v1/clipboard/toggle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: clipToggle.checked })
-      });
-      const data = await resp.json();
-      updateClipboardUI(data.clipboard_sync);
-    } catch (e) {
-      console.error("Falha ao alterar sincronização de clipboard:", e);
-    }
   });
 
   // PIN Approval Modal
@@ -91,6 +247,15 @@ function setupEventListeners() {
   const reqError = document.getElementById("pair-error-msg");
   const flowState = document.getElementById("pair-flow-state");
 
+  document.getElementById("btn-pair-request").addEventListener("click", () => {
+    reqAddr.value = "";
+    flowState.classList.add("hidden");
+    reqError.classList.add("hidden");
+    document.getElementById("btn-submit-req").style.display = "inline-flex";
+    modalReq.classList.remove("hidden");
+    reqAddr.focus();
+  });
+
   document.getElementById("btn-close-req-modal").addEventListener("click", () => modalReq.classList.add("hidden"));
   document.getElementById("btn-cancel-req").addEventListener("click", () => modalReq.classList.add("hidden"));
 
@@ -121,11 +286,30 @@ function setupEventListeners() {
     }
   });
 
-  // Hidden File input change
+  // Hidden File input change (shared by device rows and the Files panel)
   const fileInput = document.getElementById("global-file-input");
   fileInput.addEventListener("change", () => {
     if (fileInput.files && fileInput.files.length > 0 && selectedTargetForUpload) {
       uploadFilesToDevice(selectedTargetForUpload, fileInput.files);
+    }
+  });
+
+  // Files panel dropzone (target picked from the select)
+  const filesDropzone = document.getElementById("files-dropzone");
+  filesDropzone.addEventListener("click", () => {
+    const target = document.getElementById("files-target-select").value;
+    if (!target) return;
+    selectedTargetForUpload = target;
+    fileInput.click();
+  });
+  filesDropzone.addEventListener("dragover", (e) => { e.preventDefault(); filesDropzone.classList.add("drag-over"); });
+  filesDropzone.addEventListener("dragleave", () => filesDropzone.classList.remove("drag-over"));
+  filesDropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    filesDropzone.classList.remove("drag-over");
+    const target = document.getElementById("files-target-select").value;
+    if (target && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      uploadFilesToDevice(target, e.dataTransfer.files, "files-progress", "files-progress-fill");
     }
   });
 }
@@ -138,9 +322,11 @@ async function refreshDevicesAndStatus() {
       localNode = await statusResp.json();
       document.getElementById("local-device-name").textContent = localNode.device_name;
       document.getElementById("local-device-info").textContent = `ID: ${localNode.device_id.substring(0, 8)}... :${localNode.port || 24850}`;
-      updateClipboardUI(localNode.clipboard_sync);
+      applyModuleState("clipboard", localNode.clipboard_sync);
+      applyModuleState("files", localNode.files_sync);
+      applyModuleState("kvm", localNode.input_share_enabled);
       if (localNode.download_dir) {
-        document.getElementById("footer-storage-path").textContent = `Pasta de Downloads: ${localNode.download_dir}`;
+        document.getElementById("footer-storage-path").textContent = localNode.download_dir;
       }
     }
 
@@ -162,19 +348,6 @@ async function refreshDevicesAndStatus() {
   }
 }
 
-function updateClipboardUI(enabled) {
-  const toggle = document.getElementById("clipboard-toggle");
-  const label = document.getElementById("clipboard-status-label");
-  toggle.checked = !!enabled;
-  if (enabled) {
-    label.textContent = "Ativo";
-    label.style.color = "var(--success)";
-  } else {
-    label.textContent = "Pausado";
-    label.style.color = "var(--text-muted)";
-  }
-}
-
 function renderPendingBanner(pendingList) {
   const banner = document.getElementById("pairing-banner");
   if (!pendingList || pendingList.length === 0) {
@@ -190,30 +363,40 @@ function renderPendingBanner(pendingList) {
   banner.classList.remove("hidden");
 }
 
+// ---------------------------------------------------------------------
+// Devices panel
+// ---------------------------------------------------------------------
+
 function renderDevices(trusted, discovered) {
   trustedDevicesCache = trusted;
+  if (discovered !== undefined) discoveredDevicesCache = discovered;
   const trustedList = document.getElementById("trusted-devices-list");
   const discoveredList = document.getElementById("discovered-devices-list");
-  const emptyState = document.getElementById("empty-trusted-state");
 
-  document.getElementById("trusted-count-badge").textContent = `${trusted.length} dispositivo${trusted.length === 1 ? '' : 's'}`;
+  document.getElementById("trusted-count-badge").textContent = `${trusted.length} dispositivo${trusted.length === 1 ? "" : "s"}`;
+  document.getElementById("nav-trusted-badge").textContent = trusted.length;
 
   // Filter discovered to exclude already trusted
-  const trustedIDs = new Set(trusted.map(d => d.id));
-  const unpairedDiscovered = discovered.filter(d => !trustedIDs.has(d.id) && d.id !== (localNode ? localNode.device_id : ""));
+  const trustedIDs = new Set(trusted.map((d) => d.id));
+  const unpairedDiscovered = discoveredDevicesCache.filter((d) => !trustedIDs.has(d.id) && d.id !== (localNode ? localNode.device_id : ""));
 
   document.getElementById("discovered-count-badge").textContent = `${unpairedDiscovered.length} na rede`;
 
   // Render Trusted
   trustedList.innerHTML = "";
   if (trusted.length === 0) {
-    trustedList.appendChild(emptyState);
+    trustedList.innerHTML = `
+      <div class="empty-placeholder">
+        <p>Nenhum dispositivo pareado ainda.</p>
+        <p class="hint">Pareie com seus outros computadores abaixo para sincronizar clipboard e arquivos.</p>
+      </div>
+    `;
   } else {
-    trusted.forEach(dev => {
-      const card = createTrustedCard(dev);
-      trustedList.appendChild(card);
-    });
+    trusted.forEach((dev) => trustedList.appendChild(createTrustedRow(dev)));
   }
+
+  // Update the target select on the Files panel
+  populateFilesTargetSelect(trusted);
 
   // Render Discovered
   discoveredList.innerHTML = "";
@@ -225,142 +408,93 @@ function renderDevices(trusted, discovered) {
       </div>
     `;
   } else {
-    unpairedDiscovered.forEach(dev => {
-      const card = createDiscoveredCard(dev);
-      discoveredList.appendChild(card);
-    });
+    unpairedDiscovered.forEach((dev) => discoveredList.appendChild(createDiscoveredRow(dev)));
   }
 }
 
-function createTrustedCard(dev) {
-  const card = document.createElement("div");
-  card.className = "device-card";
-  card.dataset.deviceId = dev.id;
+function createTrustedRow(dev) {
+  const wrap = document.createElement("div");
 
   const isOnline = dev.is_online;
   const statusColor = isOnline ? "var(--success)" : "var(--text-muted)";
   const statusLabel = isOnline ? "Online" : "Offline";
-  const osType = (dev.name && dev.name.toLowerCase().includes("mac")) ? "macOS" : "Linux / PC";
+  const sendOpen = openSendRowId === dev.id;
 
-  card.innerHTML = `
-    <div class="device-header">
-      <div class="device-meta">
-        <div class="device-os-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-            <line x1="8" y1="21" x2="16" y2="21"/>
-            <line x1="12" y1="17" x2="12" y2="21"/>
-          </svg>
-        </div>
-        <div>
-          <div class="device-title">${escapeHtml(dev.name)}</div>
-          <div class="device-sub">${osType} &bull; ${escapeHtml(dev.last_addr || "Endereço desc.")}</div>
-        </div>
+  const sendBtnHtml = filesSyncEnabled
+    ? `<button class="btn-icon${sendOpen ? " active" : ""}" data-action="toggle-send" title="Enviar arquivo">
+         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9z"/></svg>
+       </button>`
+    : "";
+
+  wrap.innerHTML = `
+    <div class="row-card" data-device-id="${dev.id}">
+      <div class="row-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
       </div>
-      <span class="badge" style="color: ${statusColor}; border-color: ${statusColor}; background: transparent;">
-        ${statusLabel}
-      </span>
-    </div>
-
-    <div class="device-details">
-      <div><strong>ID:</strong> <code>${dev.id.substring(0, 16)}...</code></div>
-      <div><strong>Último Contato:</strong> ${dev.last_seen || "Recentemente"}</div>
-    </div>
-
-    <button class="btn btn-outline btn-sm btn-remove-device">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="3 6 5 6 21 6"/>
-        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-      </svg>
-      Remover dispositivo
-    </button>
-
-    <div class="card-dropzone" id="dropzone-${dev.id}">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-        <polyline points="17 8 12 3 7 8"/>
-        <line x1="12" y1="3" x2="12" y2="15"/>
-      </svg>
-      <div class="dropzone-label">Arraste arquivos aqui</div>
-      <div class="dropzone-hint">ou clique para selecionar e enviar para este nó</div>
-      <div class="transfer-progress-bar hidden" id="progress-${dev.id}">
-        <div class="transfer-progress-fill" id="fill-${dev.id}"></div>
+      <div style="flex:1;min-width:0;">
+        <div class="row-title">${escapeHtml(dev.name)}</div>
+        <div class="row-sub">${escapeHtml(dev.last_addr || "Endereço desc.")} &middot; ${escapeHtml(dev.last_seen || "Recentemente")}</div>
       </div>
+      <span class="status-pill" style="color:${statusColor};">${statusLabel}</span>
+      ${sendBtnHtml}
+      <button class="btn-icon" data-action="remove" title="Remover dispositivo">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </button>
     </div>
+    ${sendOpen ? `
+    <div class="inline-dropzone" id="inline-dropzone-${dev.id}">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <span>Arraste um arquivo aqui ou clique para enviar para <strong>${escapeHtml(dev.name)}</strong></span>
+    </div>` : ""}
   `;
 
-  // Drag and Drop listeners
-  const dropzone = card.querySelector(`#dropzone-${dev.id}`);
+  const row = wrap.querySelector(".row-card");
 
-  card.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    card.classList.add("drag-over");
-  });
+  const toggleBtn = row.querySelector('[data-action="toggle-send"]');
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
+      openSendRowId = sendOpen ? null : dev.id;
+      renderDevices(trustedDevicesCache);
+    });
+  }
 
-  card.addEventListener("dragleave", (e) => {
-    if (!card.contains(e.relatedTarget)) {
-      card.classList.remove("drag-over");
-    }
-  });
+  row.querySelector('[data-action="remove"]').addEventListener("click", () => removeDevice(dev.id, dev.name));
 
-  card.addEventListener("drop", (e) => {
-    e.preventDefault();
-    card.classList.remove("drag-over");
-    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      uploadFilesToDevice(dev.id, e.dataTransfer.files);
-    }
-  });
+  const inlineZone = wrap.querySelector(`#inline-dropzone-${dev.id}`);
+  if (inlineZone) {
+    inlineZone.addEventListener("click", () => {
+      selectedTargetForUpload = dev.id;
+      document.getElementById("global-file-input").click();
+    });
+    inlineZone.addEventListener("dragover", (e) => { e.preventDefault(); inlineZone.classList.add("drag-over"); });
+    inlineZone.addEventListener("dragleave", () => inlineZone.classList.remove("drag-over"));
+    inlineZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      inlineZone.classList.remove("drag-over");
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        uploadFilesToDevice(dev.id, e.dataTransfer.files);
+      }
+    });
+  }
 
-  dropzone.addEventListener("click", () => {
-    selectedTargetForUpload = dev.id;
-    const fileInput = document.getElementById("global-file-input");
-    fileInput.click();
-  });
-
-  card.querySelector(".btn-remove-device").addEventListener("click", () => {
-    removeDevice(dev.id, dev.name);
-  });
-
-  return card;
+  return wrap;
 }
 
-function createDiscoveredCard(dev) {
-  const card = document.createElement("div");
-  card.className = "device-card";
-
-  card.innerHTML = `
-    <div class="device-header">
-      <div class="device-meta">
-        <div class="device-os-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4M12 8h.01"/>
-          </svg>
-        </div>
-        <div>
-          <div class="device-title">${escapeHtml(dev.name)}</div>
-          <div class="device-sub">${escapeHtml(dev.addr)}</div>
-        </div>
+function createDiscoveredRow(dev) {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `
+    <div class="row-card">
+      <div class="row-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
       </div>
-      <span class="badge badge-secondary">Não pareado</span>
+      <div style="flex:1;min-width:0;">
+        <div class="row-title">${escapeHtml(dev.name)}</div>
+        <div class="row-sub">${escapeHtml(dev.addr)}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" data-action="pair">Parear</button>
     </div>
-
-    <div class="device-details">
-      <div><strong>ID:</strong> <code>${dev.id.substring(0, 16)}...</code></div>
-    </div>
-
-    <button class="btn btn-primary btn-sm btn-pair-peer" style="margin-top:auto; width:100%; justify-content:center;">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-        <circle cx="8.5" cy="7" r="4"/>
-        <line x1="20" y1="8" x2="20" y2="14"/>
-        <line x1="23" y1="11" x2="17" y2="11"/>
-      </svg>
-      Parear com este nó
-    </button>
   `;
-
-  card.querySelector(".btn-pair-peer").addEventListener("click", () => {
+  wrap.querySelector('[data-action="pair"]').addEventListener("click", () => {
     const modalReq = document.getElementById("modal-request-pair");
     document.getElementById("input-target-addr").value = dev.addr;
     document.getElementById("pair-flow-state").classList.add("hidden");
@@ -368,8 +502,7 @@ function createDiscoveredCard(dev) {
     document.getElementById("btn-submit-req").style.display = "inline-flex";
     modalReq.classList.remove("hidden");
   });
-
-  return card;
+  return wrap;
 }
 
 async function approvePin(pin, modal, errorElem) {
@@ -386,14 +519,14 @@ async function approvePin(pin, modal, errorElem) {
         errorElem.textContent = data.error || "PIN inválido ou expirado.";
         errorElem.classList.remove("hidden");
       } else {
-        alert("Erro: " + (data.error || "PIN inválido"));
+        showToast("Erro: " + (data.error || "PIN inválido"), "error");
       }
       return;
     }
 
     if (modal) modal.classList.add("hidden");
     document.getElementById("pairing-banner").classList.add("hidden");
-    alert(`Pareamento aprovado com sucesso com '${data.device_name}'!`);
+    showToast(`Pareamento aprovado com sucesso com '${data.device_name}'!`, "success");
     await refreshDevicesAndStatus();
   } catch (err) {
     if (errorElem) {
@@ -404,7 +537,11 @@ async function approvePin(pin, modal, errorElem) {
 }
 
 async function removeDevice(deviceId, deviceName) {
-  const confirmed = confirm(`Remover o pareamento com '${deviceName}'? Este dispositivo deixará de ser confiável e precisará ser pareado novamente para voltar a sincronizar.`);
+  const confirmed = await showConfirm(
+    "Remover dispositivo",
+    `Remover o pareamento com '${deviceName}'? Este dispositivo deixará de ser confiável e precisará ser pareado novamente para voltar a sincronizar.`,
+    "Remover"
+  );
   if (!confirmed) return;
 
   try {
@@ -416,26 +553,53 @@ async function removeDevice(deviceId, deviceName) {
 
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      alert("Erro ao remover dispositivo: " + (data.error || resp.statusText));
+      showToast("Erro ao remover dispositivo: " + (data.error || resp.statusText), "error");
       return;
     }
 
+    if (openSendRowId === deviceId) openSendRowId = null;
     await refreshDevicesAndStatus();
   } catch (err) {
-    alert("Falha de rede ao remover dispositivo: " + err.message);
+    showToast("Falha de rede ao remover dispositivo: " + err.message, "error");
   }
 }
 
-function uploadFilesToDevice(deviceId, files) {
+// ---------------------------------------------------------------------
+// Files panel
+// ---------------------------------------------------------------------
+
+function populateFilesTargetSelect(trusted) {
+  const select = document.getElementById("files-target-select");
+  const previous = select.value;
+  select.innerHTML = "";
+
+  if (trusted.length === 0) {
+    select.innerHTML = `<option value="">Nenhum dispositivo pareado</option>`;
+    return;
+  }
+
+  trusted.forEach((dev) => {
+    const opt = document.createElement("option");
+    opt.value = dev.id;
+    opt.textContent = `${dev.name} · ${dev.is_online ? "Online" : "Offline"}`;
+    if (!dev.is_online) opt.disabled = true;
+    select.appendChild(opt);
+  });
+
+  if (previous && Array.from(select.options).some((o) => o.value === previous)) {
+    select.value = previous;
+  }
+}
+
+function uploadFilesToDevice(deviceId, files, progressBarId, progressFillId) {
   for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    sendFile(deviceId, file);
+    sendFile(deviceId, files[i], progressBarId, progressFillId);
   }
 }
 
-function sendFile(deviceId, file) {
-  const progressBar = document.getElementById(`progress-${deviceId}`);
-  const progressFill = document.getElementById(`fill-${deviceId}`);
+function sendFile(deviceId, file, progressBarId, progressFillId) {
+  const progressBar = document.getElementById(progressBarId || `progress-${deviceId}`);
+  const progressFill = document.getElementById(progressFillId || `fill-${deviceId}`);
 
   if (progressBar && progressFill) {
     progressBar.classList.remove("hidden");
@@ -457,20 +621,103 @@ function sendFile(deviceId, file) {
       if (progressFill) progressFill.style.width = "100%";
       setTimeout(() => {
         if (progressBar) progressBar.classList.add("hidden");
-        alert(`Arquivo '${file.name}' enviado com sucesso!`);
+        showToast(`Arquivo '${file.name}' enviado com sucesso!`, "success");
       }, 500);
     } else {
-      alert(`Falha ao enviar '${file.name}': ${xhr.responseText}`);
+      showToast(`Falha ao enviar '${file.name}': ${xhr.responseText}`, "error");
       if (progressBar) progressBar.classList.add("hidden");
     }
   };
 
   xhr.onerror = () => {
-    alert(`Erro de conexão ao enviar '${file.name}'.`);
+    showToast(`Erro de conexão ao enviar '${file.name}'.`, "error");
     if (progressBar) progressBar.classList.add("hidden");
   };
 
   xhr.send(file);
+}
+
+// ---------------------------------------------------------------------
+// Clipboard history
+// ---------------------------------------------------------------------
+
+async function refreshClipboardHistory() {
+  try {
+    const resp = await fetch("/api/v1/clipboard/history");
+    if (!resp.ok) return;
+    const history = await resp.json();
+    renderClipboardHistory(history || []);
+  } catch (err) {
+    console.warn("Erro ao atualizar histórico de clipboard:", err);
+  }
+}
+
+function renderClipboardHistory(history) {
+  const list = document.getElementById("clipboard-history-list");
+  document.getElementById("history-count-badge").textContent = history.length;
+
+  if (history.length === 0) {
+    list.innerHTML = `<div class="empty-placeholder"><p>Nada copiado ainda.</p></div>`;
+    return;
+  }
+
+  list.innerHTML = "";
+  history.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "row-card";
+    row.innerHTML = `
+      <div style="flex:1;min-width:0;">
+        <div class="row-text">${escapeHtml(item.text)}</div>
+        <div class="row-sub">${escapeHtml(item.origin)} &middot; ${formatRelativeTime(item.time)}</div>
+      </div>
+      <button class="btn btn-outline btn-sm" data-action="copy" style="flex:0 0 auto;white-space:nowrap;">Copiar novamente</button>
+      <button class="btn-icon" data-action="remove" title="Remover do histórico">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    `;
+
+    const copyBtn = row.querySelector('[data-action="copy"]');
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(item.text);
+        copyBtn.textContent = "Copiado ✓";
+        copyBtn.style.color = "var(--success)";
+        copyBtn.style.borderColor = "var(--success)";
+        setTimeout(() => {
+          copyBtn.textContent = "Copiar novamente";
+          copyBtn.style.color = "";
+          copyBtn.style.borderColor = "";
+        }, 1600);
+      } catch (err) {
+        showToast("Não foi possível copiar automaticamente. Selecione o texto manualmente.", "error");
+      }
+    });
+
+    row.querySelector('[data-action="remove"]').addEventListener("click", async () => {
+      await fetch("/api/v1/clipboard/history/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id })
+      });
+      refreshClipboardHistory();
+    });
+
+    list.appendChild(row);
+  });
+}
+
+function formatRelativeTime(isoString) {
+  if (!isoString) return "";
+  const then = new Date(isoString).getTime();
+  if (Number.isNaN(then)) return "";
+  const diffMs = Date.now() - then;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "agora";
+  if (diffMin < 60) return `há ${diffMin} min`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `há ${diffH} h`;
+  const diffD = Math.floor(diffH / 24);
+  return `há ${diffD} d`;
 }
 
 function escapeHtml(str) {
@@ -563,7 +810,7 @@ function renderKvmStatus(status) {
     badge.style.borderColor = "";
     return;
   }
-  const dev = trustedDevicesCache.find(d => d.id === status.peer_id);
+  const dev = trustedDevicesCache.find((d) => d.id === status.peer_id);
   const name = dev ? dev.name : status.peer_id.substring(0, 8);
   badge.textContent = status.sending ? `Controlando ${name}` : `Sendo controlado por ${name}`;
   badge.className = "badge";
@@ -574,7 +821,7 @@ function renderKvmStatus(status) {
 function renderKvmPending(pending) {
   const el = document.getElementById("kvm-pending-requests");
   el.innerHTML = "";
-  (pending || []).forEach(req => {
+  (pending || []).forEach((req) => {
     const row = document.createElement("div");
     row.className = "kvm-pending-row";
     row.innerHTML = `
@@ -605,7 +852,7 @@ function renderKvmPermissionList() {
     return;
   }
 
-  trustedDevicesCache.forEach(dev => {
+  trustedDevicesCache.forEach((dev) => {
     const row = document.createElement("div");
     row.className = "permission-row";
     row.innerHTML = `
@@ -617,7 +864,7 @@ function renderKvmPermissionList() {
     `;
     row.querySelector('[data-action="ask"]').addEventListener("click", async () => {
       const r = await kvmPost("/api/v1/input/permission/ask", { device_id: dev.id });
-      if (!r.ok) alert("Não foi possível solicitar controle: " + (r.data && r.data.error ? r.data.error : "dispositivo offline?"));
+      if (!r.ok) showToast("Não foi possível solicitar controle: " + (r.data && r.data.error ? r.data.error : "dispositivo offline?"), "error");
     });
     row.querySelector('[data-action="pause"]').addEventListener("click", async () => {
       await kvmPost("/api/v1/input/pause", { device_id: dev.id });
@@ -630,8 +877,8 @@ function renderKvmPermissionList() {
 // style.css — the same numbers detectKvmEdge already assumes when reading
 // positions back. computePositionsFromLinks uses them to lay boxes out
 // actually touching along whatever server-configured links exist.
-const KVM_BOX_W = 120;
-const KVM_BOX_H = 80;
+const KVM_BOX_W = 128;
+const KVM_BOX_H = 84;
 const KVM_BOX_GAP = 2;
 
 // computePositionsFromLinks derives canvas pixel positions from the
@@ -645,8 +892,8 @@ const KVM_BOX_GAP = 2;
 // configuration with an empty one (tasks.md 7.10).
 function computePositionsFromLinks(nodeIDs, links, seedPos) {
   const adjacency = {};
-  nodeIDs.forEach(id => { adjacency[id] = []; });
-  links.forEach(l => {
+  nodeIDs.forEach((id) => { adjacency[id] = []; });
+  links.forEach((l) => {
     if (adjacency[l.from_node]) {
       adjacency[l.from_node].push({ edge: l.from_edge, to: l.to_node });
     }
@@ -683,11 +930,11 @@ function mergeKvmLayoutFromServer(layout) {
   const knownIDs = new Set(Object.keys(kvmLayoutNodes));
 
   // Ensure the local node and every trusted device has a canvas entry.
-  const allIDs = new Set([kvmLocalNodeID, ...trustedDevicesCache.map(d => d.id)].filter(Boolean));
-  allIDs.forEach(id => knownIDs.add(id));
+  const allIDs = new Set([kvmLocalNodeID, ...trustedDevicesCache.map((d) => d.id)].filter(Boolean));
+  allIDs.forEach((id) => knownIDs.add(id));
 
   const idsWithLinks = new Set();
-  serverLinks.forEach(l => { idsWithLinks.add(l.from_node); idsWithLinks.add(l.to_node); });
+  serverLinks.forEach((l) => { idsWithLinks.add(l.from_node); idsWithLinks.add(l.to_node); });
   const linkedPositions = idsWithLinks.size > 0
     ? computePositionsFromLinks(
         Array.from(idsWithLinks), serverLinks,
@@ -696,12 +943,12 @@ function mergeKvmLayoutFromServer(layout) {
     : {};
 
   let i = 0;
-  knownIDs.forEach(id => {
+  knownIDs.forEach((id) => {
     let res = serverNodes[id] || KVM_DEFAULT_NODE_SIZE_FOR(id, layout);
     if (id === kvmLocalNodeID && localNode && localNode.screen_width && localNode.screen_height) {
       res = { width_px: localNode.screen_width, height_px: localNode.screen_height };
     } else {
-      const dev = trustedDevicesCache.find(d => d.id === id);
+      const dev = trustedDevicesCache.find((d) => d.id === id);
       if (dev && dev.screen_width && dev.screen_height) {
         res = { width_px: dev.screen_width, height_px: dev.screen_height };
       }
@@ -736,7 +983,7 @@ function defaultKvmGridPosition(index) {
 
 function kvmDeviceName(id) {
   if (id === kvmLocalNodeID) return (localNode && localNode.device_name) || "Este computador";
-  const dev = trustedDevicesCache.find(d => d.id === id);
+  const dev = trustedDevicesCache.find((d) => d.id === id);
   return dev ? dev.name : id.substring(0, 8);
 }
 
@@ -744,7 +991,7 @@ function renderKvmCanvas() {
   const canvas = document.getElementById("kvm-layout-canvas");
   canvas.innerHTML = "";
 
-  Object.keys(kvmLayoutNodes).forEach(id => {
+  Object.keys(kvmLayoutNodes).forEach((id) => {
     const n = kvmLayoutNodes[id];
     const box = document.createElement("div");
     box.className = "kvm-node" + (id === kvmLocalNodeID ? " local" : "");
@@ -801,8 +1048,8 @@ function makeKvmNodeDraggable(box, canvas) {
 // KVM_TOUCH_TOLERANCE_PX) and returns the link direction, mirroring the
 // backend's Edge model (specs/screen-layout: adjacency by touching edges).
 function detectKvmEdge(a, b) {
-  const aBox = { l: a.leftPx, t: a.topPx, r: a.leftPx + 120, bo: a.topPx + 80 };
-  const bBox = { l: b.leftPx, t: b.topPx, r: b.leftPx + 120, bo: b.topPx + 80 };
+  const aBox = { l: a.leftPx, t: a.topPx, r: a.leftPx + KVM_BOX_W, bo: a.topPx + KVM_BOX_H };
+  const bBox = { l: b.leftPx, t: b.topPx, r: b.leftPx + KVM_BOX_W, bo: b.topPx + KVM_BOX_H };
 
   const verticalOverlap = Math.min(aBox.bo, bBox.bo) - Math.max(aBox.t, bBox.t) > 0;
   const horizontalOverlap = Math.min(aBox.r, bBox.r) - Math.max(aBox.l, bBox.l) > 0;
@@ -845,7 +1092,7 @@ function computeKvmLinksFromCanvas() {
 
 async function saveKvmLayout() {
   const nodes = {};
-  Object.keys(kvmLayoutNodes).forEach(id => {
+  Object.keys(kvmLayoutNodes).forEach((id) => {
     nodes[id] = { width_px: kvmLayoutNodes[id].widthRes, height_px: kvmLayoutNodes[id].heightRes };
   });
 
@@ -858,7 +1105,9 @@ async function saveKvmLayout() {
 
   const r = await kvmPost("/api/v1/input/layout", payload);
   if (!r.ok) {
-    alert("Falha ao salvar arranjo: " + (r.data && r.data.error ? r.data.error : r.status));
+    showToast("Falha ao salvar arranjo: " + (r.data && r.data.error ? r.data.error : r.status), "error");
+  } else {
+    showToast("Arranjo de telas salvo.", "success");
   }
 }
 
