@@ -118,8 +118,15 @@ func (s *Server) Start(port int) error {
 		WriteTimeout: 30 * time.Minute,
 	}
 
+	// Bind synchronously so the port is guaranteed to be accepting connections
+	// by the time Start returns (callers may immediately dial it, e.g. pairing).
+	ln, err := net.Listen("tcp", s.listenAddr)
+	if err != nil {
+		return err
+	}
+
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Printf("[server] listen error: %v", err)
 		}
 	}()
