@@ -1,0 +1,36 @@
+name: 'Apt Install (resilient)'
+description: >
+  Runs apt-get update/install with retries and drops the pre-installed
+  Google Chrome apt source, which intermittently fails with "Hash Sum
+  mismatch" on GitHub-hosted runners and is not needed for this build.
+inputs:
+  packages:
+    description: 'Space-separated list of apt packages to install'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Remove unreliable third-party apt sources
+      shell: bash
+      run: sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+
+    - name: apt-get update (with retry)
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          sudo apt-get update && exit 0
+          echo "apt-get update failed (attempt $attempt/3)"
+          [ "$attempt" -lt 3 ] && sleep 5
+        done
+        exit 1
+
+    - name: apt-get install (with retry)
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          sudo apt-get install -y ${{ inputs.packages }} && exit 0
+          echo "apt-get install failed (attempt $attempt/3)"
+          [ "$attempt" -lt 3 ] && sleep 5
+        done
+        exit 1

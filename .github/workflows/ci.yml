@@ -24,9 +24,9 @@ jobs:
           cache: true
 
       - name: Install Linux Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libx11-dev libxtst-dev libayatana-appindicator3-dev
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libx11-dev libxtst-dev libayatana-appindicator3-dev
 
       - name: Check Code Formatting (gofmt)
         run: |
@@ -59,9 +59,9 @@ jobs:
 
       - name: Install Linux Build Dependencies
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libx11-dev libxtst-dev libayatana-appindicator3-dev
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libx11-dev libxtst-dev libayatana-appindicator3-dev
 
       - name: Run Tests
         run: go test -v ./...
