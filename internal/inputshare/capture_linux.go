@@ -49,7 +49,8 @@ type x11Backend struct {
 	keyToHID map[byte]HIDUsage
 	hidToKey map[HIDUsage]byte
 
-	suppressed atomic.Bool
+	suppressed  atomic.Bool
+	warpPending atomic.Bool
 
 	mu         sync.Mutex
 	lastX      int32
@@ -244,6 +245,36 @@ func (b *x11Backend) dispatchMotion(raw []byte) {
 	cx, cy := int16(b.screenW/2), int16(b.screenH/2)
 
 	b.mu.Lock()
+	if b.suppressed.Load() && b.warpPending.Load() {
+		// When a warp was requested to (cx, cy), check if this event is the post-warp
+		// position (allowing for small in-flight user motion, e.g. within 150px of center).
+		distX := int16(ev.RootX) - cx
+		if distX < 0 {
+			distX = -distX
+		}
+		distY := int16(ev.RootY) - cy
+		if distY < 0 {
+			distY = -distY
+		}
+
+		if distX < 150 && distY < 150 {
+			// Real user motion delta is relative to the target (cx, cy) where the pointer was warped,
+			// NOT relative to the old pre-warp lastX/lastY.
+			dx := int32(ev.RootX) - int32(cx)
+			dy := int32(ev.RootY) - int32(cy)
+			b.lastX = int32(ev.RootX)
+			b.lastY = int32(ev.RootY)
+			b.haveLastXY = true
+			b.warpPending.Store(false)
+			b.mu.Unlock()
+
+			if b.cb.OnMotion != nil && (dx != 0 || dy != 0) {
+				b.cb.OnMotion(int(ev.RootX), int(ev.RootY), clampDelta16(dx), clampDelta16(dy))
+			}
+			return
+		}
+	}
+
 	var dx, dy int32
 	if b.haveLastXY {
 		dx = int32(ev.RootX) - b.lastX
@@ -253,50 +284,23 @@ func (b *x11Backend) dispatchMotion(raw []byte) {
 	b.haveLastXY = true
 
 	shouldRecenter := false
-	if b.suppressed.Load() {
+	if b.suppressed.Load() && !b.warpPending.Load() {
 		const margin = 100
 		if ev.RootX < margin || ev.RootX > int16(b.screenW)-margin ||
 			ev.RootY < margin || ev.RootY > int16(b.screenH)-margin {
+			b.warpPending.Store(true)
 			shouldRecenter = true
 		}
 	}
 	b.mu.Unlock()
 
+	if shouldRecenter {
+		xproto.WarpPointer(b.conn, 0, b.root, 0, 0, 0, 0, cx, cy)
+	}
+
 	if b.cb.OnMotion != nil {
 		b.cb.OnMotion(int(ev.RootX), int(ev.RootY), clampDelta16(dx), clampDelta16(dy))
 	}
-
-	if shouldRecenter {
-		b.recenter(cx, cy)
-	}
-}
-
-// recenter warps the pointer back to (cx, cy) using a *checked* request,
-// blocking this call (and, since dispatchMotion runs serially inside
-// recordLoop, blocking further event dispatch) until the X server confirms
-// the warp has been applied. That lets lastX/lastY be set deterministically
-// to the target right here instead of having to guess, from a later event's
-// absolute coordinates alone, whether it already reflects the warp.
-//
-// The previous approach fired WarpPointer unchecked and then inspected the
-// next motion event to decide (via "is it within 150px of the target?")
-// whether to treat it as the warp's own effect or as further pre-warp
-// motion. Under fast real movement that guess was often wrong, and
-// computing a delta against the stale pre-warp lastX/lastY produced a
-// spurious multi-hundred-pixel jump forwarded to the peer — the "recenter
-// kick" bug this project has repeatedly had to re-fix. A synchronous round
-// trip is cheap here (recentering only happens occasionally, near a screen
-// edge — unlike per-event injection, which does stay unchecked/async for
-// throughput) and removes the guess entirely.
-func (b *x11Backend) recenter(cx, cy int16) {
-	if err := xproto.WarpPointerChecked(b.conn, 0, b.root, 0, 0, 0, 0, cx, cy).Check(); err != nil {
-		log.Printf("[inputshare/x11] recenter WarpPointer failed: %v", err)
-		return
-	}
-	b.mu.Lock()
-	b.lastX, b.lastY = int32(cx), int32(cy)
-	b.haveLastXY = true
-	b.mu.Unlock()
 }
 
 func (b *x11Backend) Stop() {
@@ -467,7 +471,14 @@ func (b *x11Backend) Suppress() error {
 	// Recenter pointer away from the screen edge so continuous physical mouse
 	// motion is never clamped by X11 screen boundaries while forwarding deltas.
 	cx, cy := int16(b.screenW/2), int16(b.screenH/2)
-	b.recenter(cx, cy)
+	b.mu.Lock()
+	b.lastX = int32(cx)
+	b.lastY = int32(cy)
+	b.haveLastXY = true
+	b.warpPending.Store(true)
+	b.mu.Unlock()
+
+	xproto.WarpPointer(b.conn, 0, b.root, 0, 0, 0, 0, cx, cy)
 
 	return nil
 }
@@ -479,6 +490,7 @@ func (b *x11Backend) Suppress() error {
 // dropped if this process's X connection ever closes.
 func (b *x11Backend) Release() error {
 	b.suppressed.Store(false)
+	b.warpPending.Store(false)
 	b.mu.Lock()
 	b.haveLastXY = false
 	b.mu.Unlock()
