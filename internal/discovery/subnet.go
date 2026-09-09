@@ -11,9 +11,11 @@ import (
 )
 
 type statusResponse struct {
-	DeviceID   string `json:"device_id"`
-	DeviceName string `json:"device_name"`
-	Status     string `json:"status"`
+	DeviceID     string `json:"device_id"`
+	DeviceName   string `json:"device_name"`
+	Status       string `json:"status"`
+	ScreenWidth  int    `json:"screen_width"`
+	ScreenHeight int    `json:"screen_height"`
 }
 
 // ProbeSubnet scans local subnets on the OmniDesk port for active nodes.
@@ -76,11 +78,13 @@ func ProbeSubnet(ctx context.Context, port int, myID string) []DiscoveredPeer {
 
 				mu.Lock()
 				peers = append(peers, DiscoveredPeer{
-					ID:       res.DeviceID,
-					Name:     res.DeviceName,
-					Addr:     targetAddr,
-					Port:     port,
-					LastSeen: time.Now(),
+					ID:           res.DeviceID,
+					Name:         res.DeviceName,
+					Addr:         targetAddr,
+					Port:         port,
+					LastSeen:     time.Now(),
+					ScreenWidth:  res.ScreenWidth,
+					ScreenHeight: res.ScreenHeight,
 				})
 				mu.Unlock()
 			}(ip)

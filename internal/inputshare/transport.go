@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -88,7 +89,7 @@ func newConn(ws *websocket.Conn, peerID string, r role) *Conn {
 // MUST set handlers via SetSenderHandlers and then call Start, which lets
 // the Manager record the session as active before any event can possibly
 // arrive (avoiding a race between connection setup and state bookkeeping).
-func DialSender(ctx context.Context, targetAddr, localDeviceID, localToken, peerID string) (*Conn, error) {
+func DialSender(ctx context.Context, targetAddr, localDeviceID, localToken, peerID string) (*Conn, ScreenRect, error) {
 	u := url.URL{Scheme: "ws", Host: targetAddr, Path: "/api/v1/input/ws"}
 	header := http.Header{}
 	header.Set("X-OmniDesk-Device-ID", localDeviceID)
@@ -101,11 +102,21 @@ func DialSender(ctx context.Context, targetAddr, localDeviceID, localToken, peer
 		if resp != nil {
 			status = fmt.Sprintf(" (HTTP %d)", resp.StatusCode)
 		}
-		return nil, fmt.Errorf("inputshare: failed to dial input session with %s%s: %w", targetAddr, status, err)
+		return nil, ScreenRect{}, fmt.Errorf("inputshare: failed to dial input session with %s%s: %w", targetAddr, status, err)
 	}
 	disableNagle(ws)
 
-	return newConn(ws, peerID, roleSender), nil
+	var peerRect ScreenRect
+	if resp != nil {
+		if w, err := strconv.Atoi(resp.Header.Get("X-OmniDesk-Screen-Width")); err == nil && w > 0 {
+			peerRect.WidthPx = w
+		}
+		if h, err := strconv.Atoi(resp.Header.Get("X-OmniDesk-Screen-Height")); err == nil && h > 0 {
+			peerRect.HeightPx = h
+		}
+	}
+
+	return newConn(ws, peerID, roleSender), peerRect, nil
 }
 
 // disableNagle turns off Nagle's algorithm on a websocket connection's
@@ -143,8 +154,13 @@ var upgrader = websocket.Upgrader{
 // into the transport-level half of an input-sharing session where this node
 // is the destination. As with DialSender, the returned Conn does not pump
 // events until SetReceiverHandlers and Start are called.
-func Accept(w http.ResponseWriter, r *http.Request, peerID string) (*Conn, error) {
-	ws, err := upgrader.Upgrade(w, r, nil)
+func Accept(w http.ResponseWriter, r *http.Request, peerID string, localRect ScreenRect) (*Conn, error) {
+	respHeader := http.Header{}
+	if localRect.WidthPx > 0 && localRect.HeightPx > 0 {
+		respHeader.Set("X-OmniDesk-Screen-Width", strconv.Itoa(localRect.WidthPx))
+		respHeader.Set("X-OmniDesk-Screen-Height", strconv.Itoa(localRect.HeightPx))
+	}
+	ws, err := upgrader.Upgrade(w, r, respHeader)
 	if err != nil {
 		return nil, fmt.Errorf("inputshare: websocket upgrade failed: %w", err)
 	}

@@ -258,6 +258,28 @@ func (m *Manager) SetHotCorner(c Corner) error {
 	return m.persistLayout()
 }
 
+// LocalRect returns this node's live desktop screen dimensions.
+func (m *Manager) LocalRect() ScreenRect {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.localRect
+}
+
+// UpdatePeerResolution dynamically registers or updates a peer's resolution
+// as discovered on the LAN or established via session handshake.
+func (m *Manager) UpdatePeerResolution(peerID string, width, height int) {
+	if width <= 0 || height <= 0 || peerID == "" || peerID == m.localNodeID {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, exists := m.layout.Nodes()[peerID]
+	if !exists || current.WidthPx != width || current.HeightPx != height {
+		m.layout.SetNode(peerID, ScreenRect{WidthPx: width, HeightPx: height})
+		_ = m.persistLayout()
+	}
+}
+
 // SetLayout replaces the screen-arrangement graph and persists it
 // (task 4.4: endpoints to read/save the configured layout).
 func (m *Manager) SetLayout(nodes map[string]ScreenRect, links []Link) error {
@@ -332,7 +354,7 @@ func (m *Manager) AcceptSession(w http.ResponseWriter, r *http.Request, peerID s
 	}
 	m.mu.Unlock()
 
-	conn, err := Accept(w, r, peerID)
+	conn, err := Accept(w, r, peerID, m.localRect)
 	if err != nil {
 		return err
 	}
@@ -607,14 +629,23 @@ func (m *Manager) tryBeginSending(edge Edge, along int) {
 		return
 	}
 
-	entryX, entryY := warpEntryPoint(crossing, m.layout.Nodes()[peerID])
-
 	ctx := context.Background()
-	conn, err := DialSender(ctx, addr, m.cfg.DeviceID, dev.Token, peerID)
+	conn, peerRect, err := DialSender(ctx, addr, m.cfg.DeviceID, dev.Token, peerID)
 	if err != nil {
 		log.Printf("[inputshare] não foi possível iniciar controle de %s: %v", peerID, err)
 		return
 	}
+
+	dstRect := m.layout.Nodes()[peerID]
+	if peerRect.WidthPx > 0 && peerRect.HeightPx > 0 {
+		dstRect = peerRect
+		m.mu.Lock()
+		m.layout.SetNode(peerID, peerRect)
+		m.mu.Unlock()
+		_ = m.persistLayout()
+	}
+
+	entryX, entryY := warpEntryPoint(crossing, dstRect)
 
 	// Suppress before publishing m.active: once handleLocalMotion sees an
 	// active sender session it starts forwarding instead of watching for

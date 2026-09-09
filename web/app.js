@@ -697,7 +697,15 @@ function mergeKvmLayoutFromServer(layout) {
 
   let i = 0;
   knownIDs.forEach(id => {
-    const res = serverNodes[id] || KVM_DEFAULT_NODE_SIZE_FOR(id, layout);
+    let res = serverNodes[id] || KVM_DEFAULT_NODE_SIZE_FOR(id, layout);
+    if (id === kvmLocalNodeID && localNode && localNode.screen_width && localNode.screen_height) {
+      res = { width_px: localNode.screen_width, height_px: localNode.screen_height };
+    } else {
+      const dev = trustedDevicesCache.find(d => d.id === id);
+      if (dev && dev.screen_width && dev.screen_height) {
+        res = { width_px: dev.screen_width, height_px: dev.screen_height };
+      }
+    }
     // A node the server's links actually place always wins over a stale
     // (or absent) localStorage snapshot — see comment on
     // computePositionsFromLinks above.

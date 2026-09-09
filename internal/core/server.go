@@ -183,6 +183,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"download_dir":   s.cfg.DownloadDir,
 		"status":         "online",
 	}
+	if s.node != nil && s.node.InputMgr != nil {
+		rect := s.node.InputMgr.LocalRect()
+		if rect.WidthPx > 0 && rect.HeightPx > 0 {
+			resp["screen_width"] = rect.WidthPx
+			resp["screen_height"] = rect.HeightPx
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -615,11 +622,13 @@ func resolveUniqueFilename(dir, filename string) string {
 }
 
 type DeviceItem struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	LastAddr string `json:"last_addr"`
-	LastSeen string `json:"last_seen"`
-	IsOnline bool   `json:"is_online"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	LastAddr     string `json:"last_addr"`
+	LastSeen     string `json:"last_seen"`
+	IsOnline     bool   `json:"is_online"`
+	ScreenWidth  int    `json:"screen_width,omitempty"`
+	ScreenHeight int    `json:"screen_height,omitempty"`
 }
 
 func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
@@ -634,19 +643,29 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 		discoveredPeers = s.node.GetAllDiscoveredPeers()
 	}
 
+	var layoutNodes map[string]inputshare.ScreenRect
+	if s.node != nil && s.node.InputMgr != nil {
+		layoutNodes, _, _, _ = s.node.InputMgr.Settings()
+	}
+
 	trustedItems := make([]DeviceItem, 0, len(trustedList))
 	for _, dev := range trustedList {
 		lastSeen := "Nunca"
 		if !dev.LastSeen.IsZero() {
 			lastSeen = dev.LastSeen.Format("02/01 15:04:05")
 		}
-		trustedItems = append(trustedItems, DeviceItem{
+		item := DeviceItem{
 			ID:       dev.ID,
 			Name:     dev.Name,
 			LastAddr: dev.LastAddr,
 			LastSeen: lastSeen,
 			IsOnline: onlineMap[dev.ID],
-		})
+		}
+		if rect, ok := layoutNodes[dev.ID]; ok && rect.WidthPx > 0 {
+			item.ScreenWidth = rect.WidthPx
+			item.ScreenHeight = rect.HeightPx
+		}
+		trustedItems = append(trustedItems, item)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

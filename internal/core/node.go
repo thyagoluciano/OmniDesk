@@ -144,6 +144,10 @@ func (n *Node) OnPeerFound(peer discovery.DiscoveredPeer) {
 		dev.LastSeen = time.Now()
 		dev.LastAddr = peer.Addr
 		_ = n.Cfg.AddTrustedDevice(dev)
+
+		if peer.ScreenWidth > 0 && peer.ScreenHeight > 0 && n.InputMgr != nil {
+			n.InputMgr.UpdatePeerResolution(peer.ID, peer.ScreenWidth, peer.ScreenHeight)
+		}
 	}
 }
 

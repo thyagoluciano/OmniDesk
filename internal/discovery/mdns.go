@@ -17,12 +17,14 @@ const Domain = "local."
 
 // DiscoveredPeer represents an active peer announced via mDNS.
 type DiscoveredPeer struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	Addr     string    `json:"addr"` // e.g., 192.168.1.50:24850
-	IPs      []net.IP  `json:"ips"`
-	Port     int       `json:"port"`
-	LastSeen time.Time `json:"last_seen"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Addr         string    `json:"addr"` // e.g., 192.168.1.50:24850
+	IPs          []net.IP  `json:"ips"`
+	Port         int       `json:"port"`
+	LastSeen     time.Time `json:"last_seen"`
+	ScreenWidth  int       `json:"screen_width,omitempty"`
+	ScreenHeight int       `json:"screen_height,omitempty"`
 }
 
 // PeerHandler receives notifications when peers appear or update.

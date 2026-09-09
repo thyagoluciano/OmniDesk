@@ -24,7 +24,7 @@ func newTestServer() (*httptest.Server, *testServer) {
 	ts := &testServer{connCh: make(chan *Conn, 1)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/input/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := Accept(w, r, "client-peer")
+		conn, err := Accept(w, r, "client-peer", ScreenRect{WidthPx: 1920, HeightPx: 1080})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -52,9 +52,12 @@ func (ts *testServer) events() []Event {
 func dialTestSender(t *testing.T, srv *httptest.Server) *Conn {
 	t.Helper()
 	addr := strings.TrimPrefix(srv.URL, "http://")
-	conn, err := DialSender(context.Background(), addr, "sender-id", "token", "server-peer")
+	conn, peerRect, err := DialSender(context.Background(), addr, "sender-id", "token", "server-peer")
 	if err != nil {
 		t.Fatalf("DialSender failed: %v", err)
+	}
+	if peerRect.WidthPx != 1920 || peerRect.HeightPx != 1080 {
+		t.Fatalf("expected peerRect 1920x1080, got %dx%d", peerRect.WidthPx, peerRect.HeightPx)
 	}
 	conn.SetSenderHandlers(nil)
 	conn.Start()
