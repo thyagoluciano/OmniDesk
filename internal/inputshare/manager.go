@@ -430,9 +430,13 @@ func (m *Manager) injectAndTrack(ev Event) error {
 		}
 	}
 	active := m.active
+	cx, cy := m.cursorX, m.cursorY
+	rect := m.localRect
 	m.mu.Unlock()
 
 	if shouldReturn && active != nil {
+		log.Printf("[inputshare] tracked cursor (%d,%d) on %dx%d hit return trigger, requesting control back from %s",
+			cx, cy, rect.WidthPx, rect.HeightPx, active.peerID)
 		active.conn.SendRequestReturn()
 	}
 
@@ -554,12 +558,18 @@ func (m *Manager) StopSession() {
 func (m *Manager) clearSession(peerID string) {
 	m.mu.Lock()
 	cleared := m.active != nil && m.active.peerID == peerID
+	cx, cy := m.cursorX, m.cursorY
 	if cleared {
 		m.active = nil
 		m.heldSet = make(map[HIDUsage]bool)
 	}
 	rect := m.localRect
 	m.mu.Unlock()
+
+	if cleared {
+		log.Printf("[inputshare] receive session with %s ended (tracked cursor was at %d,%d on %dx%d), recentering",
+			peerID, cx, cy, rect.WidthPx, rect.HeightPx)
+	}
 
 	if cleared && m.backend != nil {
 		m.backend.Inject(MouseWarpEvent{X: uint16(rect.WidthPx / 2), Y: uint16(rect.HeightPx / 2)})

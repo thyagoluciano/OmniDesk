@@ -207,6 +207,13 @@ func (c *Conn) readLoop() {
 	for {
 		_, data, err := c.ws.ReadMessage()
 		if err != nil {
+			// Logged unconditionally (even for an expected close from our
+			// own teardown) so a spurious session-end can be diagnosed:
+			// this distinguishes "control bounced back because of an
+			// edge/hot-corner/hotkey" (logged where those are decided) from
+			// "control bounced back because the network/read-timeout
+			// dropped the connection out from under an active session".
+			log.Printf("[inputshare] connection with %s: read loop ending (role=%v): %v", c.peerID, c.role, err)
 			return
 		}
 		c.ws.SetReadDeadline(time.Now().Add(readTimeout))
@@ -316,6 +323,7 @@ func (c *Conn) writeLoop() {
 		case <-ticker.C:
 			c.ws.SetWriteDeadline(time.Now().Add(writeTimeout))
 			if err := c.ws.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Printf("[inputshare] connection with %s: write loop ending on ping (role=%v): %v", c.peerID, c.role, err)
 				return
 			}
 			continue
@@ -339,6 +347,7 @@ func (c *Conn) writeLoop() {
 func (c *Conn) writeEvent(ev Event) bool {
 	c.ws.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := c.ws.WriteMessage(websocket.BinaryMessage, ev.Encode()); err != nil {
+		log.Printf("[inputshare] connection with %s: write loop ending (role=%v): %v", c.peerID, c.role, err)
 		return false
 	}
 	return true

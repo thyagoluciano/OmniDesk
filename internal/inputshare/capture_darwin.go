@@ -38,6 +38,14 @@ type darwinBackend struct {
 
 	suppressed atomic.Bool
 
+	// posMu/trackedX/trackedY/haveTracked hold the injection target position
+	// this backend last posted to, accumulated locally from received DX/DY
+	// rather than re-read from the OS on every event — see nextMovePoint.
+	posMu       sync.Mutex
+	trackedX    float64
+	trackedY    float64
+	haveTracked bool
+
 	// modMu/modifierHeld track modifier press/release state ourselves:
 	// macOS reports modifier keys via kCGEventFlagsChanged, which carries
 	// no pressed/released flag of its own (see dispatchFlagsChanged) — only
@@ -360,6 +368,40 @@ func (b *darwinBackend) currentLocation() (CGPoint, error) {
 	return b.api.CGEventGetLocation(ev), nil
 }
 
+// nextMovePoint computes the absolute target for a relative MouseMoveEvent
+// by accumulating onto this backend's own last-injected position instead of
+// re-reading the OS's live cursor location (CGEventCreate(NULL) +
+// CGEventGetLocation) on every event.
+//
+// The previous approach queried the OS fresh each time, which under
+// back-to-back injections can read back a position that has not yet caught
+// up with the immediately preceding CGEventPost — CGEventPost only enqueues
+// the synthetic event, it does not block until the WindowServer has applied
+// it. Manager.injectAndTrack, meanwhile, accumulates the identical DX/DY
+// stream purely in Go to decide when the (receiving) cursor has reached a
+// screen edge worth handing control back for. Those two computations must
+// use the exact same arithmetic on the exact same inputs; querying live OS
+// state introduced a second, independently-lagging source of truth that
+// could drift ahead of what the user actually sees on screen — Manager's
+// tracked position would cross an edge (or even the whole way to the
+// opposite edge) while the visibly-displayed cursor was still short of it,
+// or nowhere near it, triggering a spurious return-to-sender.
+func (b *darwinBackend) nextMovePoint(dx, dy float64) (CGPoint, error) {
+	b.posMu.Lock()
+	defer b.posMu.Unlock()
+	if !b.haveTracked {
+		cur, err := b.currentLocation()
+		if err != nil {
+			return CGPoint{}, err
+		}
+		b.trackedX, b.trackedY = cur.X, cur.Y
+		b.haveTracked = true
+	}
+	b.trackedX += dx
+	b.trackedY += dy
+	return CGPoint{X: b.trackedX, Y: b.trackedY}, nil
+}
+
 func (b *darwinBackend) postMouseEvent(eventType uint32, pt CGPoint, button uint32) error {
 	ev := b.api.CGEventCreateMouseEvent(0, eventType, pt, button)
 	if ev == 0 {
@@ -373,15 +415,19 @@ func (b *darwinBackend) postMouseEvent(eventType uint32, pt CGPoint, button uint
 func (b *darwinBackend) Inject(ev Event) error {
 	switch e := ev.(type) {
 	case MouseMoveEvent:
-		cur, err := b.currentLocation()
+		pt, err := b.nextMovePoint(float64(e.DX), float64(e.DY))
 		if err != nil {
 			return err
 		}
-		pt := CGPoint{X: cur.X + float64(e.DX), Y: cur.Y + float64(e.DY)}
 		return b.postMouseEvent(cgEventMouseMoved, pt, 0)
 
 	case MouseWarpEvent:
-		return b.postMouseEvent(cgEventMouseMoved, CGPoint{X: float64(e.X), Y: float64(e.Y)}, 0)
+		pt := CGPoint{X: float64(e.X), Y: float64(e.Y)}
+		b.posMu.Lock()
+		b.trackedX, b.trackedY = pt.X, pt.Y
+		b.haveTracked = true
+		b.posMu.Unlock()
+		return b.postMouseEvent(cgEventMouseMoved, pt, 0)
 
 	case MouseButtonEvent:
 		cur, err := b.currentLocation()
