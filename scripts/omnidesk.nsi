@@ -2,7 +2,7 @@
 !include "FileFunc.nsh"
 
 Name "OmniDesk"
-OutFile "../dist/OmniDesk-Setup-0.1.0-x64.exe"
+OutFile "../dist/OmniDesk-Setup-0.2.0-x64.exe"
 InstallDir "$LOCALAPPDATA\Programs\OmniDesk"
 InstallDirRegKey HKCU "Software\OmniDesk" "InstallDir"
 RequestExecutionLevel user
@@ -51,7 +51,7 @@ Section "MainSection" SEC01
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "DisplayName" "OmniDesk"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "DisplayIcon" "$INSTDIR\omnidesk.ico"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "DisplayVersion" "0.1.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "DisplayVersion" "0.2.0"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OmniDesk" "Publisher" "OmniDesk"
 SectionEnd
 

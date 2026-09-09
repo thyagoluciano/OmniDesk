@@ -82,7 +82,7 @@ Recomendamos utilizar los paquetes precompilados e instaladores listos para tu s
 - **Paquete Debian / Ubuntu (`.deb`)**:
   ```bash
   # Descarga el archivo .deb desde Releases e instálalo:
-  sudo dpkg -i omnidesk_0.1.0_amd64.deb
+  sudo dpkg -i omnidesk_0.2.0_amd64.deb
   ```
   *Instala el binario en `/usr/bin/omnidesk`, los iconos, el acceso directo `.desktop` y el servicio de usuario systemd.*
 
@@ -98,7 +98,7 @@ Recomendamos utilizar los paquetes precompilados e instaladores listos para tu s
 ### 🪟 Windows (10 / 11)
 
 - **Asistente de Instalación (`.exe`)**:
-  1. Descarga `OmniDesk-Setup-0.1.0-x64.exe` desde la página de [Releases](https://github.com/thyagoluciano/OmniDesk/releases).
+  1. Descarga `OmniDesk-Setup-0.2.0-x64.exe` desde la página de [Releases](https://github.com/thyagoluciano/OmniDesk/releases).
   2. Ejecuta el asistente de instalación y sigue los pasos en pantalla.
 - **Instalación por Terminal (PowerShell / CMD)**:
   ```powershell

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
 TARGET_EXE="${DIST_DIR}/omnidesk.exe"
@@ -24,7 +24,7 @@ cp "${TARGET_EXE}" "${STAGING_ZIP}/"
 cp "${ROOT_DIR}/assets/omnidesk.ico" "${STAGING_ZIP}/"
 
 cat <<'EOF' > "${STAGING_ZIP}/LEIA-ME.txt"
-OmniDesk para Windows v0.1.0
+OmniDesk para Windows v0.2.0
 ==================================================
 
 COMO INSTALAR E USAR:

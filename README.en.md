@@ -82,7 +82,7 @@ We recommend installing OmniDesk using the ready-to-use packages for your operat
 - **Debian / Ubuntu Package (`.deb`)**:
   ```bash
   # Download the .deb package from Releases and install:
-  sudo dpkg -i omnidesk_0.1.0_amd64.deb
+  sudo dpkg -i omnidesk_0.2.0_amd64.deb
   ```
   *Installs the binary to `/usr/bin/omnidesk`, sets up icons, desktop launcher, and the systemd user service.*
 
@@ -98,7 +98,7 @@ We recommend installing OmniDesk using the ready-to-use packages for your operat
 ### 🪟 Windows (10 / 11)
 
 - **Setup Wizard Installer (`.exe`)**:
-  1. Download `OmniDesk-Setup-0.1.0-x64.exe` from the [Releases](https://github.com/thyagoluciano/OmniDesk/releases) page.
+  1. Download `OmniDesk-Setup-0.2.0-x64.exe` from the [Releases](https://github.com/thyagoluciano/OmniDesk/releases) page.
   2. Run the setup wizard and follow the prompts.
 - **Terminal Installation (PowerShell / CMD)**:
   ```powershell
