@@ -5,8 +5,12 @@ echo "======================================================="
 echo "        Instalador do OmniDesk para macOS"
 echo "======================================================="
 
-# 1. Check if OmniDesk.app is next to this script
-if [ -d "OmniDesk.app" ]; then
+# 1. Check if OmniDesk.app is in dist/ or next to this script
+if [ -d "../dist/OmniDesk.app" ]; then
+    echo "-> Instalando OmniDesk.app de dist/ em /Applications..."
+    rm -rf /Applications/OmniDesk.app
+    cp -R "../dist/OmniDesk.app" /Applications/
+elif [ -d "OmniDesk.app" ]; then
     echo "-> Instalando OmniDesk.app em /Applications..."
     rm -rf /Applications/OmniDesk.app
     cp -R "OmniDesk.app" /Applications/

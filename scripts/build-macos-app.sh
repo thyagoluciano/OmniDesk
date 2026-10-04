@@ -16,9 +16,9 @@ mkdir -p "${MACOS_DIR}"
 mkdir -p "${RESOURCES_DIR}"
 
 if [ "$(uname -s)" = "Darwin" ]; then
-    CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -ldflags="-s -w" -o "${MACOS_DIR}/omnidesk" ./cmd/omnidesk
+    CGO_ENABLED=1 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildvcs=false -ldflags="-s -w" -o "${MACOS_DIR}/omnidesk" ./cmd/omnidesk
 else
-    CGO_ENABLED=0 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -ldflags="-s -w" -o "${MACOS_DIR}/omnidesk" ./cmd/omnidesk
+    CGO_ENABLED=0 GOOS=darwin GOARCH="${TARGET_ARCH}" go build -buildvcs=false -ldflags="-s -w" -o "${MACOS_DIR}/omnidesk" ./cmd/omnidesk
 fi
 
 echo "==> Gerando PkgInfo..."
