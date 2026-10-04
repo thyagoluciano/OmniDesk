@@ -8,7 +8,7 @@ import (
 
 // Assets contains all embedded web UI files (HTML, CSS, JS).
 //
-//go:embed index.html style.css app.js
+//go:embed index.html style.css app.js qrcode.min.js
 var Assets embed.FS
 
 // GetFileSystem returns an http.FileSystem serving the embedded web UI files.

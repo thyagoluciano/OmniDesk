@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -222,5 +223,11 @@ func (n *Node) GetAllDiscoveredPeers() []discovery.DiscoveredPeer {
 	for _, peer := range n.onlinePeers {
 		result = append(result, peer)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Name != result[j].Name {
+			return result[i].Name < result[j].Name
+		}
+		return result[i].ID < result[j].ID
+	})
 	return result
 }

@@ -64,3 +64,21 @@ func TestConfigLoadAndTrustedDevices(t *testing.T) {
 		t.Errorf("expected clipboard sync to be false")
 	}
 }
+
+func TestListTrustedDevicesIsStable(t *testing.T) {
+	c := &Config{TrustedDevices: map[string]TrustedDevice{}}
+	base := time.Now()
+	for i, id := range []string{"c", "a", "d", "b", "e"} {
+		c.TrustedDevices[id] = TrustedDevice{ID: id, AddedAt: base.Add(time.Duration(i) * time.Minute)}
+	}
+	want := "cadbe"
+	for n := 0; n < 50; n++ {
+		got := ""
+		for _, d := range c.ListTrustedDevices() {
+			got += d.ID
+		}
+		if got != want {
+			t.Fatalf("iteration %d: order %q, want %q", n, got, want)
+		}
+	}
+}

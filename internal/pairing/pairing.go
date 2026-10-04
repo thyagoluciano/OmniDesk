@@ -209,6 +209,12 @@ func (m *Manager) ApproveSession(sessionID string) error {
 	return nil
 }
 
+// isInboundRequest reports whether s is a pairing request from another device
+// to this node. Caller must hold m.mu.
+func (m *Manager) isInboundRequest(s *Session) bool {
+	return s.RequesterID != "" && s.RequesterID != m.cfg.DeviceID && s.ResponderID == m.cfg.DeviceID
+}
+
 // ApproveByPIN approves the active session matching the given 6-digit PIN.
 func (m *Manager) ApproveByPIN(pin string) (*Session, error) {
 	m.mu.Lock()
@@ -217,7 +223,7 @@ func (m *Manager) ApproveByPIN(pin string) (*Session, error) {
 	cleanPIN := strings.ReplaceAll(strings.TrimSpace(pin), " ", "")
 
 	for _, sess := range m.sessions {
-		if sess.PIN == cleanPIN && time.Now().Before(sess.ExpiresAt) {
+		if sess.PIN == cleanPIN && time.Now().Before(sess.ExpiresAt) && m.isInboundRequest(sess) {
 			sess.Approved = true
 			sess.AuthToken = generateToken()
 
@@ -233,6 +239,72 @@ func (m *Manager) ApproveByPIN(pin string) (*Session, error) {
 		}
 	}
 	return nil, errors.New("nenhuma sessão pendente encontrada com este PIN ou PIN expirado")
+}
+
+// CreateQRSession pre-generates a pairing session specifically for QR code display.
+func (m *Manager) CreateQRSession() *Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	pin := GeneratePIN()
+	sessID := generateToken()
+	now := time.Now()
+
+	sess := &Session{
+		ID:            sessID,
+		PIN:           pin,
+		ResponderID:   m.cfg.DeviceID,
+		ResponderName: m.cfg.DeviceName,
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(5 * time.Minute),
+	}
+	m.sessions[sessID] = sess
+	return sess
+}
+
+// RedeemQRSession is called when a mobile device scans the QR code and submits its credentials.
+func (m *Manager) RedeemQRSession(pin, requesterID, requesterName, requesterAddr string) (*Session, string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cleanPIN := strings.ReplaceAll(strings.TrimSpace(pin), " ", "")
+	for _, sess := range m.sessions {
+		if sess.PIN == cleanPIN && time.Now().Before(sess.ExpiresAt) {
+			if sess.Approved {
+				return sess, sess.AuthToken, nil
+			}
+			sess.Approved = true
+			sess.RequesterID = requesterID
+			sess.RequesterName = requesterName
+			sess.RequesterAddr = requesterAddr
+			sess.AuthToken = generateToken()
+
+			_ = m.cfg.AddTrustedDevice(config.TrustedDevice{
+				ID:       requesterID,
+				Name:     requesterName,
+				Token:    sess.AuthToken,
+				AddedAt:  time.Now(),
+				LastSeen: time.Now(),
+				LastAddr: requesterAddr,
+			})
+			return sess, sess.AuthToken, nil
+		}
+	}
+	return nil, "", errors.New("sessão de QR Code inválida ou expirada")
+}
+
+// IsQRSessionApproved checks if the given PIN was redeemed and approved.
+func (m *Manager) IsQRSessionApproved(pin string) (*Session, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cleanPIN := strings.ReplaceAll(strings.TrimSpace(pin), " ", "")
+	for _, sess := range m.sessions {
+		if sess.PIN == cleanPIN && sess.Approved && time.Now().Before(sess.ExpiresAt) {
+			return sess, true
+		}
+	}
+	return nil, false
 }
 
 // HandleConfirmRequest responds to the confirmation endpoint.
@@ -301,7 +373,9 @@ func (m *Manager) CompletePairing(peerAddr string, session *Session) error {
 	})
 }
 
-// GetPendingSessions returns active unexpired pairing sessions.
+// GetPendingSessions returns inbound pairing requests awaiting local approval.
+// Sessions this node created itself (outbound requests and QR sessions that
+// nobody redeemed yet) are not approvable here and are excluded.
 func (m *Manager) GetPendingSessions() []*Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -309,7 +383,7 @@ func (m *Manager) GetPendingSessions() []*Session {
 	var list []*Session
 	now := time.Now()
 	for _, s := range m.sessions {
-		if now.Before(s.ExpiresAt) {
+		if now.Before(s.ExpiresAt) && !s.Approved && m.isInboundRequest(s) {
 			list = append(list, s)
 		}
 	}

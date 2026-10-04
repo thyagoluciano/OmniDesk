@@ -160,3 +160,107 @@ func TestResolveUniqueFilename(t *testing.T) {
 		t.Errorf("expected doc (2).pdf, got %s", path3)
 	}
 }
+
+func TestServerQRPairing(t *testing.T) {
+	tempDir := t.TempDir()
+	cfg := &config.Config{
+		DeviceID:       "desktop-1",
+		DeviceName:     "MacBook Pro",
+		ListenPort:     24850,
+		DownloadDir:    tempDir,
+		ClipboardSync:  true,
+		TrustedDevices: make(map[string]config.TrustedDevice),
+	}
+
+	pMgr := pairing.NewManager(cfg)
+	srv := NewServer(cfg, pMgr, &mockClipHandler{}, nil)
+
+	// 1. Generate QR Code payload
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/qr/generate", nil)
+	w := httptest.NewRecorder()
+	srv.handlePairQRGenerate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 from pair/qr/generate, got %d", w.Code)
+	}
+
+	var qrResp struct {
+		V     int      `json:"v"`
+		ID    string   `json:"id"`
+		Name  string   `json:"name"`
+		Addrs []string `json:"addrs"`
+		PIN   string   `json:"pin"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &qrResp); err != nil {
+		t.Fatalf("invalid QR response: %v", err)
+	}
+	if qrResp.ID != "desktop-1" || len(qrResp.PIN) != 6 {
+		t.Fatalf("invalid QR payload fields: %+v", qrResp)
+	}
+
+	// 2. Check QR Status before redeem -> not approved
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/pair/qr/status?pin="+qrResp.PIN, nil)
+	w = httptest.NewRecorder()
+	srv.handlePairQRStatus(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 from pair/qr/status, got %d", w.Code)
+	}
+	var statusResp struct {
+		Approved bool `json:"approved"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &statusResp)
+	if statusResp.Approved {
+		t.Fatal("expected approved to be false before redeem")
+	}
+
+	// 3. Mobile redeems QR code
+	redeemPayload := PairQRRedeemRequest{
+		PIN:           qrResp.PIN,
+		RequesterID:   "mobile-iphone",
+		RequesterName: "iPhone 15 Pro",
+		RequesterAddr: "192.168.1.100:24851",
+	}
+	body, _ := json.Marshal(redeemPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/pair/qr/redeem", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	srv.handlePairQRRedeem(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 from pair/qr/redeem, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var redeemResp struct {
+		Success   bool   `json:"success"`
+		AuthToken string `json:"auth_token"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &redeemResp)
+	if !redeemResp.Success || redeemResp.AuthToken == "" {
+		t.Fatalf("expected success and auth_token from redeem, got: %+v", redeemResp)
+	}
+
+	// 4. Check QR Status after redeem -> approved!
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/pair/qr/status?pin="+qrResp.PIN, nil)
+	w = httptest.NewRecorder()
+	srv.handlePairQRStatus(w, req)
+	_ = json.Unmarshal(w.Body.Bytes(), &statusResp)
+	if !statusResp.Approved {
+		t.Fatal("expected approved to be true after redeem")
+	}
+
+	// 5. Verify mobile device is trusted in config
+	if !cfg.IsTrusted("mobile-iphone", redeemResp.AuthToken) {
+		t.Fatal("expected mobile-iphone to be trusted in config")
+	}
+}
+
+func TestNormalizeRequesterAddr(t *testing.T) {
+	cases := []struct{ reported, remote, want string }{
+		{"0.0.0.0:24851", "192.168.100.50:51000", "192.168.100.50:24851"},
+		{"", "192.168.100.50:51000", "192.168.100.50:24851"},
+		{"127.0.0.1:24851", "192.168.100.50:51000", "192.168.100.50:24851"},
+		{"192.168.100.60:24851", "192.168.100.50:51000", "192.168.100.60:24851"},
+	}
+	for _, c := range cases {
+		if got := normalizeRequesterAddr(c.reported, c.remote); got != c.want {
+			t.Errorf("normalizeRequesterAddr(%q, %q) = %q, want %q", c.reported, c.remote, got, c.want)
+		}
+	}
+}

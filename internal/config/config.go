@@ -4,9 +4,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -139,6 +141,9 @@ func Load() (*Config, error) {
 		if cfg.TrustedDevices == nil {
 			cfg.TrustedDevices = make(map[string]TrustedDevice)
 		}
+		// Drop entries without an ID: they can't be removed from the UI and
+		// were created by an earlier self-pairing bug.
+		delete(cfg.TrustedDevices, "")
 		if cfg.InputShare.Nodes == nil {
 			cfg.InputShare.Nodes = make(map[string]ScreenNode)
 		}
@@ -173,6 +178,9 @@ func (c *Config) Save() error {
 
 // AddTrustedDevice stores a newly paired device.
 func (c *Config) AddTrustedDevice(device TrustedDevice) error {
+	if device.ID == "" {
+		return errors.New("trusted device requires an ID")
+	}
 	c.mu.Lock()
 	if c.TrustedDevices == nil {
 		c.TrustedDevices = make(map[string]TrustedDevice)
@@ -217,6 +225,13 @@ func (c *Config) ListTrustedDevices() []TrustedDevice {
 	for _, dev := range c.TrustedDevices {
 		list = append(list, dev)
 	}
+	// Map iteration order is random; keep the list stable so the UI doesn't reshuffle.
+	sort.Slice(list, func(i, j int) bool {
+		if !list[i].AddedAt.Equal(list[j].AddedAt) {
+			return list[i].AddedAt.Before(list[j].AddedAt)
+		}
+		return list[i].ID < list[j].ID
+	})
 	return list
 }
 

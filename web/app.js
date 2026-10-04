@@ -286,6 +286,78 @@ function setupEventListeners() {
     }
   });
 
+  // QR Code Pairing Modal
+  const modalQR = document.getElementById("modal-qr-pair");
+  const btnPairQR = document.getElementById("btn-pair-qr");
+  let qrPollTimer = null;
+
+  if (btnPairQR) {
+    btnPairQR.addEventListener("click", async () => {
+      const container = document.getElementById("qr-code-container");
+      const pinDisplay = document.getElementById("display-qr-pin");
+      const instruction = document.getElementById("qr-status-instruction");
+      container.innerHTML = `<div id="qr-loading-spinner" style="color: #0f172a; font-size: 13px;">Gerando QR Code...</div>`;
+      pinDisplay.textContent = "------";
+      instruction.textContent = "Aguardando leitura pelo celular na rede Wi-Fi...";
+      modalQR.classList.remove("hidden");
+
+      if (qrPollTimer) {
+        clearInterval(qrPollTimer);
+        qrPollTimer = null;
+      }
+
+      try {
+        const resp = await fetch("/api/v1/pair/qr/generate", { method: "POST" });
+        if (!resp.ok) throw new Error("Falha ao gerar sessão QR");
+        const payload = await resp.json();
+
+        pinDisplay.textContent = payload.pin;
+
+        // Render QR Code SVG
+        if (typeof window.createQRCodeSVG === "function") {
+          const svgHtml = window.createQRCodeSVG(JSON.stringify(payload), 5, 2);
+          container.innerHTML = svgHtml;
+        } else {
+          container.innerHTML = `<p style="color:#0f172a; font-size:12px;">PIN: ${payload.pin}</p>`;
+        }
+
+        // Start polling for mobile redemption
+        qrPollTimer = setInterval(async () => {
+          try {
+            const statusResp = await fetch(`/api/v1/pair/qr/status?pin=${encodeURIComponent(payload.pin)}`);
+            if (statusResp.ok) {
+              const statusData = await statusResp.json();
+              if (statusData.approved) {
+                clearInterval(qrPollTimer);
+                qrPollTimer = null;
+                modalQR.classList.add("hidden");
+                const devName = statusData.device_name || "Celular";
+                showToast(`${devName} pareado com sucesso!`, "success", 4000);
+                await refreshDevicesAndStatus();
+              }
+            }
+          } catch (err) {
+            // ignore network polling hiccups
+          }
+        }, 1500);
+
+      } catch (err) {
+        container.innerHTML = `<p style="color:#dc2626; font-size:13px;">Erro ao gerar QR Code: ${err.message}</p>`;
+      }
+    });
+  }
+
+  const closeQRModal = () => {
+    modalQR.classList.add("hidden");
+    if (qrPollTimer) {
+      clearInterval(qrPollTimer);
+      qrPollTimer = null;
+    }
+  };
+  document.getElementById("btn-close-qr-modal").addEventListener("click", closeQRModal);
+  document.getElementById("btn-cancel-qr").addEventListener("click", closeQRModal);
+
+
   // Hidden File input change (shared by device rows and the Files panel)
   const fileInput = document.getElementById("global-file-input");
   fileInput.addEventListener("change", () => {

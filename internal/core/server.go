@@ -78,6 +78,7 @@ func (s *Server) Start(port int) error {
 	mux.HandleFunc("/api/v1/pair/confirm", s.handlePairConfirm)
 	mux.HandleFunc("/api/v1/pair/approve-pin", s.handleApprovePIN)
 	mux.HandleFunc("/api/v1/pair/pending", s.handlePendingSessions)
+	mux.HandleFunc("/api/v1/pair/qr/redeem", s.handlePairQRRedeem)
 
 	// Web UI management endpoints - local dashboard only, never called peer-to-peer,
 	// so these are restricted to loopback callers rather than exposed on the LAN.
@@ -85,6 +86,8 @@ func (s *Server) Start(port int) error {
 	mux.HandleFunc("/api/v1/devices/send", s.loopbackOnly(s.handleDevicesSend))
 	mux.HandleFunc("/api/v1/devices/pair", s.loopbackOnly(s.handleDevicesPair))
 	mux.HandleFunc("/api/v1/devices/remove", s.loopbackOnly(s.handleDevicesRemove))
+	mux.HandleFunc("/api/v1/pair/qr/generate", s.loopbackOnly(s.handlePairQRGenerate))
+	mux.HandleFunc("/api/v1/pair/qr/status", s.loopbackOnly(s.handlePairQRStatus))
 	mux.HandleFunc("/api/v1/clipboard/toggle", s.loopbackOnly(s.handleClipboardToggle))
 	mux.HandleFunc("/api/v1/clipboard/history", s.loopbackOnly(s.handleClipboardHistory))
 	mux.HandleFunc("/api/v1/clipboard/history/remove", s.loopbackOnly(s.handleClipboardHistoryRemove))
@@ -179,7 +182,11 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" && host != "127.0.0.1" && host != "::1" {
 			if dev, ok := s.cfg.GetTrustedDevice(devID); ok {
 				dev.LastSeen = time.Now()
-				dev.LastAddr = fmt.Sprintf("%s:%d", host, s.cfg.ListenPort)
+				port := fmt.Sprint(s.cfg.ListenPort)
+				if _, p, err := net.SplitHostPort(dev.LastAddr); err == nil && p != "" {
+					port = p
+				}
+				dev.LastAddr = net.JoinHostPort(host, port)
 				_ = s.cfg.AddTrustedDevice(dev)
 			}
 		}
@@ -653,6 +660,10 @@ func resolveUniqueFilename(dir, filename string) string {
 	}
 }
 
+// recentlySeenWindow keeps a paired device (e.g. a phone that doesn't announce
+// itself over mDNS) shown as online for a while after it last contacted us.
+const recentlySeenWindow = 2 * time.Minute
+
 type DeviceItem struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -691,7 +702,7 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 			Name:     dev.Name,
 			LastAddr: dev.LastAddr,
 			LastSeen: lastSeen,
-			IsOnline: onlineMap[dev.ID],
+			IsOnline: onlineMap[dev.ID] || (!dev.LastSeen.IsZero() && time.Since(dev.LastSeen) < recentlySeenWindow),
 		}
 		if rect, ok := layoutNodes[dev.ID]; ok && rect.WidthPx > 0 {
 			item.ScreenWidth = rect.WidthPx
@@ -958,4 +969,138 @@ func getOutboundIPForServer(target string) string {
 	defer conn.Close()
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	return localAddr.IP.String()
+}
+
+func getAllLocalIPs() []string {
+	var ips []string
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ips
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() || ip.To4() == nil {
+				continue
+			}
+			ips = append(ips, ip.String())
+		}
+	}
+	return ips
+}
+
+func (s *Server) handlePairQRGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sess := s.pairingMgr.CreateQRSession()
+	localIPs := getAllLocalIPs()
+	var addrs []string
+	for _, ip := range localIPs {
+		addrs = append(addrs, fmt.Sprintf("%s:%d", ip, s.cfg.ListenPort))
+	}
+	if len(addrs) == 0 {
+		addrs = []string{fmt.Sprintf("127.0.0.1:%d", s.cfg.ListenPort)}
+	}
+
+	resp := map[string]any{
+		"v":     1,
+		"id":    s.cfg.DeviceID,
+		"name":  s.cfg.DeviceName,
+		"addrs": addrs,
+		"pin":   sess.PIN,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// normalizeRequesterAddr replaces a missing, unspecified (0.0.0.0) or loopback
+// address reported by a peer with the IP the request actually came from,
+// keeping the peer's advertised port (default 24851, the mobile listener).
+func normalizeRequesterAddr(reported, remoteAddr string) string {
+	host, port, err := net.SplitHostPort(reported)
+	if err != nil {
+		host, port = "", "24851"
+	}
+	if ip := net.ParseIP(host); host == "" || (ip != nil && (ip.IsUnspecified() || ip.IsLoopback())) {
+		remoteHost, _, err := net.SplitHostPort(remoteAddr)
+		if err != nil || remoteHost == "" {
+			return reported
+		}
+		host = remoteHost
+	}
+	return net.JoinHostPort(host, port)
+}
+
+type PairQRRedeemRequest struct {
+	PIN           string `json:"pin"`
+	RequesterID   string `json:"requester_id"`
+	RequesterName string `json:"requester_name"`
+	RequesterAddr string `json:"requester_addr"`
+}
+
+func (s *Server) handlePairQRRedeem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req PairQRRedeemRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PIN == "" || req.RequesterID == "" {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	req.RequesterAddr = normalizeRequesterAddr(req.RequesterAddr, r.RemoteAddr)
+
+	sess, authToken, err := s.pairingMgr.RedeemQRSession(req.PIN, req.RequesterID, req.RequesterName, req.RequesterAddr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success":     true,
+		"auth_token":  authToken,
+		"device_id":   s.cfg.DeviceID,
+		"device_name": s.cfg.DeviceName,
+		"session_id":  sess.ID,
+	})
+}
+
+func (s *Server) handlePairQRStatus(w http.ResponseWriter, r *http.Request) {
+	pin := r.URL.Query().Get("pin")
+	if pin == "" {
+		http.Error(w, "pin is required", http.StatusBadRequest)
+		return
+	}
+
+	sess, approved := s.pairingMgr.IsQRSessionApproved(pin)
+	resp := map[string]any{
+		"approved": approved,
+	}
+	if approved && sess != nil {
+		resp["device_name"] = sess.RequesterName
+		resp["device_id"] = sess.RequesterID
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
