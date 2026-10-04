@@ -89,9 +89,14 @@ Our mission is to build the fastest, most reliable, and completely private cross
 ### Phase 5: General Availability & Mobile Apps (`v1.0.0+`)
 *Goal: Achieve full multi-device ubiquity across desktop and mobile operating systems.*
 
-- [ ] :bulb: **Mobile Companion Apps (Android & iOS)**:
-  - Share clipboard text and links between phones, tablets, and desktops.
-  - Quick camera roll photo and file sharing to desktop.
+- [ ] :calendar: **Mobile Companion Apps (Android & iOS) — Cross-Device Copy & Paste**:
+  - **Bidirectional Clipboard Synchronization**: Instant copy and paste of text, URLs, and code snippets between desktop computers (Linux, macOS, Windows) and mobile devices (Android & iOS).
+  - **Zero-Cloud Local P2P Sync**: Direct local-network synchronization (ZeroConf/mDNS discovery and local sockets) with 100% privacy and zero cloud dependence.
+  - **Fast QR Code Pairing**: Scan a QR code from the desktop Web UI (`/ui/`) using the mobile app for instant, cryptographically verified mutual pairing.
+  - **Mobile OS Clipboard Integration**:
+    - **Android**: Background sync service, Quick Settings tile, and notification action for rapid clipboard capture and sync, respecting modern Android background clipboard privacy policies.
+    - **iOS**: Share Sheet extension, clipboard action widget, and pasteboard sync tools compliant with iOS security and background restrictions.
+  - **Camera Roll & Media Transfer**: Quickly beam photos, videos, and documents between mobile storage and paired desktop computers.
 - [ ] :calendar: **Automated Background Updates**: Self-updating binary with release channel support (Stable, Beta, Nightly).
 - [ ] :bulb: **Community Plugin System**: Webhook and gRPC/JSON-RPC API for community extensions and home automation integrations.
 
