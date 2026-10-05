@@ -13,6 +13,7 @@
   <a href="https://github.com/thyagoluciano/OmniDesk/actions/workflows/ci.yml"><img src="https://github.com/thyagoluciano/OmniDesk/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
   <a href="https://golang.org/"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go" alt="Go Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-blue" alt="Platforms"></a>
+  <a href="https://github.com/thyagoluciano/OmniDeskMobile"><img src="https://img.shields.io/badge/Mobile%20App-iOS%20%7C%20Android-blueviolet?logo=flutter" alt="OmniDesk Mobile"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="ROADMAP.md"><img src="https://img.shields.io/badge/roadmap-active-success.svg" alt="Roadmap"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="Contributions"></a>
@@ -26,6 +27,7 @@
 
 <p align="center">
   <a href="#-what-is-omnidesk">About</a> &nbsp;•&nbsp;
+  <a href="#-the-omnidesk-ecosystem-desktop--mobile">Ecosystem</a> &nbsp;•&nbsp;
   <a href="#-quick-installation-installers">Installers</a> &nbsp;•&nbsp;
   <a href="#-how-to-use">How to Use</a> &nbsp;•&nbsp;
   <a href="#-cli-mode-command-line">CLI Mode</a> &nbsp;•&nbsp;
@@ -56,6 +58,36 @@ Unlike cloud-based tools, OmniDesk operates **100% peer-to-peer (P2P)**:
 - 💻 **Intuitive Web Dashboard**: Modern control panel accessible at `http://127.0.0.1:24850/ui/` or via `omnidesk gui`.
 - 🔔 **Native Notifications & System Tray**: Tray/menu bar icon across Linux, macOS, and Windows with transfer and pairing alerts.
 - ⚙️ **Autostart with System**: Runs automatically in the background on user login without requiring administrative privileges (`root`/`sudo`).
+
+---
+
+## 📱 The OmniDesk Ecosystem (Desktop + Mobile)
+
+OmniDesk is built as a complete, zero-friction local-first productivity ecosystem. It consists of two complementary open-source repositories:
+
+| Project | Target Platforms | Tech Stack | Repository |
+| :--- | :--- | :--- | :--- |
+| 🖥️ **OmniDesk** *(This repository)* | Linux, macOS, Windows | Go, Web/JS, Native Tray | [thyagoluciano/OmniDesk](https://github.com/thyagoluciano/OmniDesk) |
+| 📱 **OmniDesk Mobile** | iOS, Android | Flutter, Dart, Hardware Crypto | [thyagoluciano/OmniDeskMobile](https://github.com/thyagoluciano/OmniDeskMobile) |
+
+### 🔄 How Desktop & Mobile Work Together:
+
+```
+┌─────────────────────────────────┐                 ┌─────────────────────────────────┐
+│        OmniDesk Desktop         │                 │         OmniDesk Mobile         │
+│  (macOS / Linux / Windows)      │                 │         (iOS / Android)         │
+│                                 │                 │                                 │
+│  • Go Daemon (Port 24850)       │  Wi-Fi / LAN    │  • Flutter Client (Port 24851)  │
+│  • Web Dashboard & System Tray  │◄───────────────►│  • In-App QR Camera Scanner     │
+│  • QR Pairing Session Generator │ mDNS / Bonjour  │  • Gallery & File Picker        │
+│  • OS Clipboard Engine          │ P2P Sockets     │  • Secure Keychain / Keystore   │
+└─────────────────────────────────┘                 └─────────────────────────────────┘
+```
+
+1. **Zero-Configuration Discovery**: Both desktop nodes and mobile devices announce themselves via Bonjour / mDNS (`_omnidesk._tcp`) over your local Wi-Fi.
+2. **Instant QR Code Pairing**: On your desktop Web UI (`/ui/`), click **Pair Phone (QR Code)**. On your phone, launch [OmniDesk Mobile](https://github.com/thyagoluciano/OmniDeskMobile) and scan the code displayed on your screen. Cryptographic auth tokens are exchanged mutually in seconds.
+3. **Seamless Clipboard Bridge**: Copy text, links, or code on your phone and paste instantly on your workstation (or vice-versa), with built-in anti-echo loop prevention.
+4. **Instant Photo & File Beaming**: Select photos directly from your camera roll or browse documents to beam them directly to your desktop at maximum local Wi-Fi speeds without internet or cloud storage.
 
 ---
 
@@ -121,13 +153,20 @@ Once started, OmniDesk runs quietly in your **System Tray** / Menu Bar.
 
 ### 2. 1-Click Device Pairing
 
-Computers only need to be paired once to establish mutual trust:
+Devices only need to be paired once to establish mutual trust and cryptographic credentials:
 
+#### 💻 Between Computers (Desktop ↔ Desktop):
 1. Open the dashboard on **Computer A** and scroll to **Discovered Devices**.
 2. Click **Pair** next to the target computer.
 3. A temporary **6-digit PIN** will be displayed on Computer A's screen.
 4. On **Computer B**, click **Approve PIN** at the top, enter the 6 digits, and confirm.
 5. Done! Both computers are securely connected using cryptographic tokens.
+
+#### 📱 With Mobile Devices (Desktop ↔ [OmniDesk Mobile](https://github.com/thyagoluciano/OmniDeskMobile)):
+1. In the desktop web panel (`/ui/`), click the **Pair Phone (QR Code)** button.
+2. Launch the **OmniDesk Mobile** app on your iPhone or Android device and tap the scan button.
+3. Aim your phone's camera at the QR code displayed on the monitor.
+4. The mobile app securely redeems the token and confirms pairing instantly, unlocking immediate clipboard synchronization and photo/file sharing!
 
 ---
 

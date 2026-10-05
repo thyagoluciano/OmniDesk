@@ -6,6 +6,9 @@ contact_links:
   - name: 🗺️ Product Roadmap
     url: https://github.com/thyagoluciano/OmniDesk/blob/main/ROADMAP.md
     about: Check planned milestones, current development status, and upcoming releases.
+  - name: 📱 OmniDesk Mobile Repository (iOS & Android)
+    url: https://github.com/thyagoluciano/OmniDeskMobile
+    about: For bugs, suggestions, and pull requests relating specifically to the mobile companion app.
   - name: 🛡️ Report a Security Vulnerability
     url: https://github.com/thyagoluciano/OmniDesk/security/advisories/new
     about: Responsibly disclose security vulnerabilities to the maintainers privately.
